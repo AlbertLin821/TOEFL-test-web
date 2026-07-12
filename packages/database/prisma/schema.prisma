@@ -1,0 +1,556 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrgStatus {
+  active
+  suspended
+}
+
+enum UserRole {
+  platform_admin
+  org_admin
+  teacher
+  student
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum ClassStatus {
+  active
+  archived
+}
+
+enum PublishStatus {
+  draft
+  published
+  archived
+}
+
+enum SectionType {
+  reading
+  listening
+  writing
+  speaking
+}
+
+enum GradingType {
+  auto
+  ai
+  manual
+}
+
+enum AssetType {
+  audio
+  image
+  pdf
+  video
+}
+
+enum AssignmentStatus {
+  scheduled
+  active
+  closed
+}
+
+enum AttemptStatus {
+  not_started
+  hardware_check
+  in_progress
+  submitted
+  grading
+  completed
+  expired
+  error
+}
+
+enum SectionStateStatus {
+  not_started
+  in_progress
+  completed
+}
+
+enum AudioResponseStatus {
+  uploaded
+  transcribed
+  failed
+}
+
+enum GradingJobType {
+  writing_grading
+  speaking_transcription
+  speaking_grading
+  report_generation
+}
+
+enum GradingJobStatus {
+  queued
+  processing
+  succeeded
+  failed
+  retrying
+}
+
+enum AiSkill {
+  writing
+  speaking
+}
+
+enum AiResultStatus {
+  succeeded
+  failed
+  manual_review_required
+}
+
+enum ReportStatus {
+  draft
+  published
+}
+
+enum EmailStatus {
+  queued
+  sent
+  failed
+}
+
+model Organization {
+  id            String    @id @default(uuid())
+  name          String
+  slug          String    @unique
+  status        OrgStatus @default(active)
+  planType      String?   @map("plan_type")
+  studentQuota  Int       @default(0) @map("student_quota")
+  examQuota     Int       @default(0) @map("exam_quota")
+  aiCreditQuota Int       @default(0) @map("ai_credit_quota")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  users       User[]
+  classes     Class[]
+  examPapers  ExamPaper[]
+  assignments ExamAssignment[]
+  attempts    Attempt[]
+  emailLogs   EmailLog[]
+  auditLogs   AuditLog[]
+
+  @@map("organizations")
+}
+
+model User {
+  id              String     @id @default(uuid())
+  organizationId  String?    @map("organization_id")
+  email           String     @unique
+  passwordHash    String     @map("password_hash")
+  name            String
+  role            UserRole
+  status          UserStatus @default(active)
+  emailVerifiedAt DateTime?  @map("email_verified_at")
+  lastLoginAt     DateTime?  @map("last_login_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  organization    Organization?    @relation(fields: [organizationId], references: [id])
+  classMembers    ClassMember[]
+  taughtClasses   Class[]          @relation("ClassTeacher")
+  attempts        Attempt[]
+  assignmentsMade ExamAssignment[] @relation("AssignedBy")
+  teacherComments TeacherComment[]
+  scoreReports    ScoreReport[]
+
+  @@index([organizationId, role])
+  @@map("users")
+}
+
+model Class {
+  id             String      @id @default(uuid())
+  organizationId String      @map("organization_id")
+  name           String
+  teacherId      String?     @map("teacher_id")
+  status         ClassStatus @default(active)
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  organization Organization     @relation(fields: [organizationId], references: [id])
+  teacher      User?            @relation("ClassTeacher", fields: [teacherId], references: [id])
+  members      ClassMember[]
+  assignments  ExamAssignment[]
+
+  @@index([organizationId])
+  @@map("classes")
+}
+
+model ClassMember {
+  id       String   @id @default(uuid())
+  classId  String   @map("class_id")
+  userId   String   @map("user_id")
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, userId])
+  @@map("class_members")
+}
+
+model ExamPaper {
+  id             String        @id @default(uuid())
+  organizationId String?       @map("organization_id")
+  title          String
+  description    String?
+  status         PublishStatus @default(draft)
+  createdBy      String?       @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  versions     ExamVersion[]
+
+  @@index([organizationId])
+  @@map("exam_papers")
+}
+
+model ExamVersion {
+  id          String        @id @default(uuid())
+  examPaperId String        @map("exam_paper_id")
+  versionNo   String        @map("version_no")
+  status      PublishStatus @default(draft)
+  totalScore  Int           @default(120) @map("total_score")
+  publishedAt DateTime?     @map("published_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  examPaper   ExamPaper        @relation(fields: [examPaperId], references: [id])
+  sections    ExamSection[]
+  assignments ExamAssignment[]
+  attempts    Attempt[]
+  reports     ScoreReport[]
+
+  @@unique([examPaperId, versionNo])
+  @@map("exam_versions")
+}
+
+model ExamSection {
+  id            String      @id @default(uuid())
+  examVersionId String      @map("exam_version_id")
+  sectionType   SectionType @map("section_type")
+  title         String
+  orderNo       Int         @map("order_no")
+  scoreMax      Int         @default(30) @map("score_max")
+
+  examVersion   ExamVersion           @relation(fields: [examVersionId], references: [id])
+  modules       ExamModule[]
+  sectionStates AttemptSectionState[]
+
+  @@unique([examVersionId, sectionType])
+  @@map("exam_sections")
+}
+
+model ExamModule {
+  id               String  @id @default(uuid())
+  sectionId        String  @map("section_id")
+  moduleType       String  @map("module_type")
+  title            String
+  description      String?
+  orderNo          Int     @map("order_no")
+  timeLimitSeconds Int?    @map("time_limit_seconds")
+  allowBack        Boolean @default(false) @map("allow_back")
+  allowReview      Boolean @default(false) @map("allow_review")
+  allowReplay      Boolean @default(false) @map("allow_replay")
+
+  section ExamSection @relation(fields: [sectionId], references: [id])
+  items   ExamItem[]
+
+  @@index([sectionId])
+  @@map("exam_modules")
+}
+
+model ExamItem {
+  id               String      @id @default(uuid())
+  moduleId         String      @map("module_id")
+  itemType         String      @map("item_type")
+  orderNo          Int         @map("order_no")
+  contentJson      Json        @map("content_json")
+  gradingType      GradingType @map("grading_type")
+  timeLimitSeconds Int?        @map("time_limit_seconds")
+  scoreMax         Decimal     @default(1) @map("score_max") @db.Decimal(6, 2)
+  createdAt        DateTime    @default(now()) @map("created_at")
+
+  module         ExamModule      @relation(fields: [moduleId], references: [id])
+  assets         ExamAsset[]
+  answerKeys     AnswerKey[]
+  responses      Response[]
+  audioResponses AudioResponse[]
+  aiGradeResults AiGradeResult[]
+
+  @@index([moduleId])
+  @@map("exam_items")
+}
+
+model ExamAsset {
+  id              String    @id @default(uuid())
+  examItemId      String?   @map("exam_item_id")
+  assetType       AssetType @map("asset_type")
+  storageKey      String    @map("storage_key")
+  publicUrl       String?   @map("public_url")
+  mimeType        String    @map("mime_type")
+  durationSeconds Int?      @map("duration_seconds")
+  checksum        String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  examItem ExamItem? @relation(fields: [examItemId], references: [id])
+
+  @@index([examItemId])
+  @@map("exam_assets")
+}
+
+model AnswerKey {
+  id              String   @id @default(uuid())
+  examItemId      String   @map("exam_item_id")
+  answerJson      Json     @map("answer_json")
+  scoringRuleJson Json?    @map("scoring_rule_json")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  examItem ExamItem @relation(fields: [examItemId], references: [id])
+
+  @@index([examItemId])
+  @@map("answer_keys")
+}
+
+model ExamAssignment {
+  id             String           @id @default(uuid())
+  organizationId String           @map("organization_id")
+  examVersionId  String           @map("exam_version_id")
+  classId        String?          @map("class_id")
+  assignedBy     String?          @map("assigned_by")
+  opensAt        DateTime         @map("opens_at")
+  closesAt       DateTime         @map("closes_at")
+  maxAttempts    Int              @default(1) @map("max_attempts")
+  status         AssignmentStatus @default(scheduled)
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  examVersion  ExamVersion  @relation(fields: [examVersionId], references: [id])
+  class        Class?       @relation(fields: [classId], references: [id])
+  assigner     User?        @relation("AssignedBy", fields: [assignedBy], references: [id])
+  attempts     Attempt[]
+
+  @@index([organizationId])
+  @@index([classId])
+  @@map("exam_assignments")
+}
+
+model Attempt {
+  id               String        @id @default(uuid())
+  organizationId   String        @map("organization_id")
+  assignmentId     String        @map("assignment_id")
+  studentId        String        @map("student_id")
+  examVersionId    String        @map("exam_version_id")
+  status           AttemptStatus @default(not_started)
+  startedAt        DateTime?     @map("started_at")
+  submittedAt      DateTime?     @map("submitted_at")
+  completedAt      DateTime?     @map("completed_at")
+  lastSavedAt      DateTime?     @map("last_saved_at")
+  currentSectionId String?       @map("current_section_id")
+  currentItemId    String?       @map("current_item_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  organization   Organization          @relation(fields: [organizationId], references: [id])
+  assignment     ExamAssignment        @relation(fields: [assignmentId], references: [id])
+  student        User                  @relation(fields: [studentId], references: [id])
+  examVersion    ExamVersion           @relation(fields: [examVersionId], references: [id])
+  sectionStates  AttemptSectionState[]
+  responses      Response[]
+  audioResponses AudioResponse[]
+  gradingJobs    GradingJob[]
+  aiGradeResults AiGradeResult[]
+  scoreReports   ScoreReport[]
+
+  @@index([organizationId])
+  @@index([assignmentId, studentId])
+  @@map("attempts")
+}
+
+model AttemptSectionState {
+  id               String             @id @default(uuid())
+  attemptId        String             @map("attempt_id")
+  sectionId        String             @map("section_id")
+  moduleId         String?            @map("module_id")
+  status           SectionStateStatus @default(not_started)
+  startedAt        DateTime?          @map("started_at")
+  completedAt      DateTime?          @map("completed_at")
+  remainingSeconds Int?               @map("remaining_seconds")
+  currentItemId    String?            @map("current_item_id")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  attempt Attempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  section ExamSection @relation(fields: [sectionId], references: [id])
+
+  @@unique([attemptId, sectionId])
+  @@map("attempt_section_states")
+}
+
+model Response {
+  id           String   @id @default(uuid())
+  attemptId    String   @map("attempt_id")
+  examItemId   String   @map("exam_item_id")
+  responseJson Json     @map("response_json")
+  isCorrect    Boolean? @map("is_correct")
+  scoreAwarded Decimal? @map("score_awarded") @db.Decimal(6, 2)
+  savedAt      DateTime @default(now()) @map("saved_at")
+
+  attempt  Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  examItem ExamItem @relation(fields: [examItemId], references: [id])
+
+  @@unique([attemptId, examItemId])
+  @@map("responses")
+}
+
+model AudioResponse {
+  id              String              @id @default(uuid())
+  attemptId       String              @map("attempt_id")
+  examItemId      String              @map("exam_item_id")
+  storageKey      String              @map("storage_key")
+  mimeType        String              @map("mime_type")
+  durationMs      Int?                @map("duration_ms")
+  transcriptText  String?             @map("transcript_text")
+  transcriptModel String?             @map("transcript_model")
+  status          AudioResponseStatus @default(uploaded)
+  createdAt       DateTime            @default(now()) @map("created_at")
+
+  attempt  Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  examItem ExamItem @relation(fields: [examItemId], references: [id])
+
+  @@unique([attemptId, examItemId])
+  @@map("audio_responses")
+}
+
+model GradingJob {
+  id           String           @id @default(uuid())
+  attemptId    String           @map("attempt_id")
+  jobType      GradingJobType   @map("job_type")
+  status       GradingJobStatus @default(queued)
+  retryCount   Int              @default(0) @map("retry_count")
+  errorMessage String?          @map("error_message")
+  payloadJson  Json?            @map("payload_json")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  attempt Attempt @relation(fields: [attemptId], references: [id])
+
+  @@index([attemptId])
+  @@map("grading_jobs")
+}
+
+model AiGradeResult {
+  id             String         @id @default(uuid())
+  attemptId      String         @map("attempt_id")
+  examItemId     String         @map("exam_item_id")
+  skill          AiSkill
+  modelName      String         @map("model_name")
+  promptVersion  String         @map("prompt_version")
+  overallScore   Decimal        @map("overall_score") @db.Decimal(5, 2)
+  rubricJson     Json           @map("rubric_json")
+  feedbackJson   Json           @map("feedback_json")
+  tokenUsageJson Json?          @map("token_usage_json")
+  costEstimate   Decimal?       @map("cost_estimate") @db.Decimal(10, 6)
+  status         AiResultStatus @default(succeeded)
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  attempt  Attempt  @relation(fields: [attemptId], references: [id])
+  examItem ExamItem @relation(fields: [examItemId], references: [id])
+
+  @@index([attemptId])
+  @@map("ai_grade_results")
+}
+
+model ScoreReport {
+  id             String       @id @default(uuid())
+  attemptId      String       @map("attempt_id")
+  studentId      String       @map("student_id")
+  examVersionId  String       @map("exam_version_id")
+  totalScore     Decimal?     @map("total_score") @db.Decimal(6, 2)
+  readingScore   Decimal?     @map("reading_score") @db.Decimal(5, 2)
+  listeningScore Decimal?     @map("listening_score") @db.Decimal(5, 2)
+  writingScore   Decimal?     @map("writing_score") @db.Decimal(5, 2)
+  speakingScore  Decimal?     @map("speaking_score") @db.Decimal(5, 2)
+  reportJson     Json?        @map("report_json")
+  pdfStorageKey  String?      @map("pdf_storage_key")
+  status         ReportStatus @default(draft)
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  attempt     Attempt          @relation(fields: [attemptId], references: [id])
+  student     User             @relation(fields: [studentId], references: [id])
+  examVersion ExamVersion      @relation(fields: [examVersionId], references: [id])
+  versions    ReportVersion[]
+  comments    TeacherComment[]
+
+  @@unique([attemptId])
+  @@map("score_reports")
+}
+
+model ReportVersion {
+  id            String   @id @default(uuid())
+  scoreReportId String   @map("score_report_id")
+  versionNo     Int      @map("version_no")
+  reportJson    Json     @map("report_json")
+  changedBy     String?  @map("changed_by")
+  changeReason  String?  @map("change_reason")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  scoreReport ScoreReport @relation(fields: [scoreReportId], references: [id], onDelete: Cascade)
+
+  @@unique([scoreReportId, versionNo])
+  @@map("report_versions")
+}
+
+model TeacherComment {
+  id            String   @id @default(uuid())
+  scoreReportId String   @map("score_report_id")
+  teacherId     String   @map("teacher_id")
+  commentText   String   @map("comment_text")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  scoreReport ScoreReport @relation(fields: [scoreReportId], references: [id], onDelete: Cascade)
+  teacher     User        @relation(fields: [teacherId], references: [id])
+
+  @@index([scoreReportId])
+  @@map("teacher_comments")
+}
+
+model EmailLog {
+  id             String      @id @default(uuid())
+  organizationId String?     @map("organization_id")
+  toEmail        String      @map("to_email")
+  subject        String
+  templateKey    String      @map("template_key")
+  status         EmailStatus @default(queued)
+  errorMessage   String?     @map("error_message")
+  metadataJson   Json?       @map("metadata_json")
+  sentAt         DateTime?   @map("sent_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("email_logs")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String?  @map("organization_id")
+  actorUserId    String?  @map("actor_user_id")
+  action         String
+  resourceType   String   @map("resource_type")
+  resourceId     String?  @map("resource_id")
+  metadataJson   Json?    @map("metadata_json")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
