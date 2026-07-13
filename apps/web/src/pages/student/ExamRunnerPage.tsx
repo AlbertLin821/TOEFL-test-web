@@ -12,8 +12,29 @@ import {
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import ExamTopBar from '../../components/exam/ExamTopBar';
+import ExamFlowShell from '../../components/exam/ExamFlowShell';
+import HardwareCheckFlow from '../../components/exam/HardwareCheckFlow';
+import ReadingExamTopBar from '../../components/exam/ReadingExamTopBar';
+import ReadingFillBlankQuestion from '../../components/exam/ReadingFillBlankQuestion';
+import ReadingChoiceGroupQuestion from '../../components/exam/ReadingChoiceGroupQuestion';
+import ReadingSectionIntro from '../../components/exam/ReadingSectionIntro';
+import ReadingModuleIntro from '../../components/exam/ReadingModuleIntro';
+import ReadingModuleEnd from '../../components/exam/ReadingModuleEnd';
+import ReadingSectionEnd from '../../components/exam/ReadingSectionEnd';
+import WritingEssayQuestion from '../../components/exam/WritingEssayQuestion';
+import SpeakingSectionIntro from '../../components/exam/SpeakingSectionIntro';
+import SpeakingModuleIntro from '../../components/exam/SpeakingModuleIntro';
+import SpeakingModuleEnd from '../../components/exam/SpeakingModuleEnd';
+import SpeakingSectionEnd from '../../components/exam/SpeakingSectionEnd';
+import SpeakingExamTopBar from '../../components/exam/SpeakingExamTopBar';
+import SpeakingQuestionPanel from '../../components/exam/SpeakingQuestionPanel';
+import SpeakingStopDialog from '../../components/exam/SpeakingStopDialog';
+import { getReadingChoiceGroupBounds, isStackedReadingGroup } from '../../lib/reading-choice-group';
+import { getReadingQuestionLabel, buildReadingReviewEntries } from '../../lib/reading-exam-utils';
+import { getSpeakingQuestionLabel, getSpeakingResponseSeconds, getSpeakingVolumeControl, waitForSpeakingStopDialogMinimum } from '../../lib/speaking-exam-utils';
 import { useCountdown } from '../../hooks/useCountdown';
 import { api, type ExamItemDetail, type ExamModuleDetail, type ExamSectionDetail } from '../../lib/api';
+import { EXAM_DEBUG_START_AT_SPEAKING } from '../../lib/exam-debug';
 
 function SortableToken({ id }: { id: string }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
@@ -38,16 +59,27 @@ export default function ExamRunnerPage() {
   const [sectionIdx, setSectionIdx] = useState(0);
   const [moduleIdx, setModuleIdx] = useState(0);
   const [itemIdx, setItemIdx] = useState(0);
-  const [phase, setPhase] = useState<'section_intro' | 'module_intro' | 'item' | 'section_end'>('section_intro');
+  const [phase, setPhase] = useState<
+    'section_intro' | 'module_intro' | 'module_scenario' | 'module_end' | 'item' | 'section_end'
+  >('section_intro');
   const [showTimer, setShowTimer] = useState(true);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [reviewOpen, setReviewOpen] = useState(false);
   const [listeningLocked, setListeningLocked] = useState(true);
   const [volume, setVolume] = useState(1);
+  const [volumeOpen, setVolumeOpen] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const speakingPromptAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const activeSpeakItemIdRef = useRef<string | null>(null);
+  const speakingTimedOutRef = useRef(false);
+  const speakingStopDialogShownAtRef = useRef(0);
+  const stopSpeakingRef = useRef<(timedOut?: boolean) => void>(() => {});
   const [speakingPhase, setSpeakingPhase] = useState<'idle' | 'playing' | 'recording' | 'uploading'>('idle');
+  const [speakingResponseLimit, setSpeakingResponseLimit] = useState(0);
+  const [showSpeakingStopDialog, setShowSpeakingStopDialog] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
+  const [debugReady, setDebugReady] = useState(!EXAM_DEBUG_START_AT_SPEAKING);
 
   const attemptQuery = useQuery({
     queryKey: ['attempt', attemptId],
@@ -55,10 +87,13 @@ export default function ExamRunnerPage() {
     enabled: !!attemptId,
   });
 
+  const attemptStatus = attemptQuery.data?.status;
+  const pendingHardwareCheck = !!attemptId && attemptStatus === 'hardware_check';
+
   const examQuery = useQuery({
     queryKey: ['exam-version', attemptQuery.data?.exam_version_id],
     queryFn: () => api.getExamVersion(attemptQuery.data!.exam_version_id),
-    enabled: !!attemptQuery.data?.exam_version_id,
+    enabled: !!attemptQuery.data?.exam_version_id && !pendingHardwareCheck,
   });
 
   useEffect(() => {
@@ -69,6 +104,22 @@ export default function ExamRunnerPage() {
     }
   }, [attemptQuery.data]);
 
+  useEffect(() => {
+    if (!EXAM_DEBUG_START_AT_SPEAKING || !examQuery.data) return;
+
+    const speakingIdx = examQuery.data.sections.findIndex((s) => s.section_type === 'speaking');
+    if (speakingIdx < 0) {
+      setDebugReady(true);
+      return;
+    }
+
+    setSectionIdx(speakingIdx);
+    setModuleIdx(0);
+    setItemIdx(0);
+    setPhase('section_intro');
+    setDebugReady(true);
+  }, [examQuery.data]);
+
   const sections = examQuery.data?.sections ?? [];
   const section: ExamSectionDetail | undefined = sections[sectionIdx];
   const mod: ExamModuleDetail | undefined = section?.modules[moduleIdx];
@@ -78,10 +129,55 @@ export default function ExamRunnerPage() {
     goNext();
   });
 
-  const itemTimer = useCountdown(item?.time_limit_seconds ?? 0, phase === 'item' && !!item?.time_limit_seconds, () => {
+  const itemTimer = useCountdown(item?.time_limit_seconds ?? 0, phase === 'item' && !!item?.time_limit_seconds && section?.section_type !== 'speaking', () => {
     if (section?.section_type === 'listening') goNext();
-    if (section?.section_type === 'speaking') stopSpeaking();
   });
+
+  const stopSpeaking = useCallback((timedOut = false) => {
+    speakingTimedOutRef.current = timedOut;
+    if (timedOut) {
+      speakingStopDialogShownAtRef.current = Date.now();
+      setShowSpeakingStopDialog(true);
+    }
+
+    const mr = mediaRecorder.current;
+    if (!mr || mr.state !== 'recording') {
+      if (timedOut) {
+        setSpeakingResponseLimit(0);
+        setSpeakingPhase('uploading');
+      }
+      return;
+    }
+
+    setSpeakingResponseLimit(0);
+    setSpeakingPhase('uploading');
+    mr.stop();
+  }, []);
+
+  stopSpeakingRef.current = stopSpeaking;
+
+  const [speakingResponseRemaining, setSpeakingResponseRemaining] = useState(0);
+
+  useEffect(() => {
+    if (speakingPhase !== 'recording' || speakingResponseLimit <= 0) {
+      setSpeakingResponseRemaining(0);
+      return;
+    }
+
+    setSpeakingResponseRemaining(speakingResponseLimit);
+    const timer = window.setInterval(() => {
+      setSpeakingResponseRemaining((current) => {
+        if (current <= 1) {
+          window.clearInterval(timer);
+          stopSpeakingRef.current(true);
+          return 0;
+        }
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [speakingPhase, speakingResponseLimit]);
 
   const saveAnswer = useCallback(
     async (itemId: string, response: unknown) => {
@@ -112,32 +208,61 @@ export default function ExamRunnerPage() {
     persistSection();
   }, [sectionIdx, moduleIdx, itemIdx, persistSection]);
 
+  const finishExam = async () => {
+    if (!attemptId) return;
+    await api.submitAttempt(attemptId);
+    navigate(`/exam/${attemptId}/grading`);
+  };
+
   const goNext = async () => {
     if (!section || !mod) return;
     setReviewOpen(false);
-    if (itemIdx < mod.items.length - 1) {
+
+    if (section.section_type === 'reading' && isStackedReadingGroup(mod.items, itemIdx)) {
+      const { end } = getReadingChoiceGroupBounds(mod.items, itemIdx);
+      const nextIdx = end + 1;
+      if (nextIdx < mod.items.length) {
+        setItemIdx(nextIdx);
+        return;
+      }
+    } else if (itemIdx < mod.items.length - 1) {
       setItemIdx((i) => i + 1);
       setListeningLocked(section.section_type === 'listening');
       return;
     }
     if (moduleIdx < section.modules.length - 1) {
+      if (section.section_type === 'reading' || section.section_type === 'speaking') {
+        setPhase('module_end');
+        return;
+      }
       setModuleIdx((m) => m + 1);
       setItemIdx(0);
       setPhase('module_intro');
+      return;
+    }
+    if (section.section_type === 'speaking') {
+      setPhase('section_end');
       return;
     }
     if (sectionIdx < sections.length - 1) {
       setPhase('section_end');
       return;
     }
-    if (attemptId) {
-      await api.submitAttempt(attemptId);
-      navigate(`/exam/${attemptId}/grading`);
-    }
+    await finishExam();
   };
 
   const goBack = () => {
     if (!mod?.allow_back || itemIdx === 0) return;
+
+    if (section?.section_type === 'reading' && isStackedReadingGroup(mod.items, itemIdx)) {
+      const { start } = getReadingChoiceGroupBounds(mod.items, itemIdx);
+      if (start > 0) {
+        setItemIdx(start - 1);
+        return;
+      }
+      return;
+    }
+
     setItemIdx((i) => i - 1);
   };
 
@@ -156,9 +281,20 @@ export default function ExamRunnerPage() {
   const startModule = () => {
     setPhase('item');
     setListeningLocked(section?.section_type === 'listening');
-    if (section?.section_type === 'speaking' && item) {
-      void runSpeakingItem(item);
+  };
+
+  const continueFromModuleIntro = () => {
+    if (section?.section_type === 'speaking' && mod?.module_type === 'speaking_listen_repeat') {
+      setPhase('module_scenario');
+      return;
     }
+    startModule();
+  };
+
+  const continueFromModuleEnd = () => {
+    setModuleIdx((m) => m + 1);
+    setItemIdx(0);
+    setPhase('module_intro');
   };
 
   const playListeningAudio = (url: string) => {
@@ -180,67 +316,139 @@ export default function ExamRunnerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item?.id, phase]);
 
-  const stopSpeaking = async () => {
-    const mr = mediaRecorder.current;
-    if (!mr || mr.state !== 'recording') return;
-    setSpeakingPhase('uploading');
-    mr.stop();
-  };
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
 
-  const runSpeakingItem = async (speakItem: ExamItemDetail) => {
-    setSpeakingPhase('playing');
-    const promptUrl = speakItem.assets[0]?.url;
-    const responseSeconds = Number(speakItem.content.response_seconds ?? 45);
+  const runSpeakingItem = useCallback(
+    async (speakItem: ExamItemDetail) => {
+      speakingTimedOutRef.current = false;
+      speakingStopDialogShownAtRef.current = 0;
+      setShowSpeakingStopDialog(false);
+      setSpeakingPhase('playing');
+      setSpeakingResponseLimit(0);
+      const promptUrl = speakItem.assets[0]?.url;
+      const responseSeconds = getSpeakingResponseSeconds(speakItem);
 
-    const startRecording = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mr = new MediaRecorder(stream);
-        mediaRecorder.current = mr;
-        const chunks: Blob[] = [];
-        mr.ondataavailable = (e) => chunks.push(e.data);
-        mr.onstop = async () => {
-          stream.getTracks().forEach((t) => t.stop());
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          if (attemptId) {
-            await api.uploadAudio(attemptId, speakItem.id, blob, responseSeconds * 1000);
-          }
+      const startRecording = async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const mr = new MediaRecorder(stream);
+          mediaRecorder.current = mr;
+          activeSpeakItemIdRef.current = speakItem.id;
+          const chunks: Blob[] = [];
+          mr.ondataavailable = (e) => chunks.push(e.data);
+          mr.onstop = async () => {
+            if (activeSpeakItemIdRef.current !== speakItem.id) {
+              stream.getTracks().forEach((t) => t.stop());
+              return;
+            }
+            stream.getTracks().forEach((t) => t.stop());
+            const blob = new Blob(chunks, { type: 'audio/webm' });
+            const timedOut = speakingTimedOutRef.current;
+            if (timedOut) {
+              if (speakingStopDialogShownAtRef.current === 0) {
+                speakingStopDialogShownAtRef.current = Date.now();
+              }
+              setShowSpeakingStopDialog(true);
+            }
+            setSpeakingPhase('uploading');
+            try {
+              if (attemptId) {
+                await api.uploadAudio(attemptId, speakItem.id, blob, responseSeconds * 1000);
+              }
+            } finally {
+              if (timedOut) {
+                await waitForSpeakingStopDialogMinimum(speakingStopDialogShownAtRef.current);
+              }
+              speakingTimedOutRef.current = false;
+              speakingStopDialogShownAtRef.current = 0;
+              setShowSpeakingStopDialog(false);
+              setSpeakingResponseLimit(0);
+              setSpeakingPhase('idle');
+            }
+          };
+          mr.start();
+          setSpeakingResponseLimit(responseSeconds);
+          setSpeakingPhase('recording');
+        } catch {
+          setSpeakingResponseLimit(0);
+          setSpeakingPhase('idle');
+          alert('麥克風無法使用，請返回 Hardware Check 重新測試。');
+        }
+      };
+
+      if (promptUrl) {
+        speakingPromptAudioRef.current?.pause();
+        const audio = new Audio(promptUrl);
+        speakingPromptAudioRef.current = audio;
+        audio.volume = volumeRef.current;
+        audio.onended = () => void startRecording();
+        audio.onerror = () => {
           setSpeakingPhase('idle');
         };
-        mr.start();
-        setSpeakingPhase('recording');
-        setTimeout(() => stopSpeaking(), responseSeconds * 1000);
-      } catch {
-        setSpeakingPhase('idle');
-        alert('麥克風無法使用，請返回 Hardware Check 重新測試。');
+        try {
+          await audio.play();
+        } catch {
+          setSpeakingPhase('idle');
+        }
+      } else {
+        await startRecording();
       }
-    };
-
-    if (promptUrl) {
-      const audio = new Audio(promptUrl);
-      audio.volume = volume;
-      audio.onended = () => void startRecording();
-      await audio.play();
-    } else {
-      await startRecording();
-    }
-  };
+    },
+    [attemptId],
+  );
 
   useEffect(() => {
-    if (phase === 'item' && section?.section_type === 'speaking' && item) {
-      void runSpeakingItem(item);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item?.id, phase, section?.section_type]);
+    if (phase !== 'item' || section?.section_type !== 'speaking' || !item) return;
+
+    void runSpeakingItem(item);
+
+    return () => {
+      activeSpeakItemIdRef.current = null;
+      speakingTimedOutRef.current = false;
+      speakingStopDialogShownAtRef.current = 0;
+      setShowSpeakingStopDialog(false);
+      speakingPromptAudioRef.current?.pause();
+      speakingPromptAudioRef.current = null;
+      setSpeakingResponseLimit(0);
+      setSpeakingResponseRemaining(0);
+      const mr = mediaRecorder.current;
+      if (mr && mr.state === 'recording') {
+        mr.stop();
+      }
+      mediaRecorder.current = null;
+    };
+  }, [item?.id, phase, section?.section_type, runSpeakingItem]);
 
   const sensors = useSensors(useSensor(PointerSensor));
 
-  if (attemptQuery.isLoading || examQuery.isLoading) return <div className="p-8">Loading exam...</div>;
+  if (attemptQuery.isLoading) return <div className="p-8">Loading exam...</div>;
+
+  if (pendingHardwareCheck && attemptId && attemptStatus) {
+    return (
+      <HardwareCheckFlow
+        attemptId={attemptId}
+        attemptStatus={attemptStatus}
+        onComplete={() => {
+          void attemptQuery.refetch();
+        }}
+      />
+    );
+  }
+
+  if (examQuery.isLoading || (EXAM_DEBUG_START_AT_SPEAKING && !debugReady)) {
+    return <div className="p-8">Loading exam...</div>;
+  }
+
   if (!section) return <div className="p-8">Exam data unavailable.</div>;
 
   const questionLabel =
     phase === 'item' && item
-      ? `Question ${item.content.question_number ?? item.order_no}`
+      ? section.section_type === 'reading'
+        ? getReadingQuestionLabel(section, item, mod?.items ?? [], itemIdx)
+        : section.section_type === 'speaking'
+          ? getSpeakingQuestionLabel(section, item)
+          : `Question ${item.content.question_number ?? item.order_no}`
       : section.title;
 
   const timer =
@@ -250,36 +458,36 @@ export default function ExamRunnerPage() {
         ? moduleTimer
         : null;
 
+  const isReadingItem = section.section_type === 'reading' && phase === 'item';
+  const isSpeakingItem = section.section_type === 'speaking' && phase === 'item';
+  const speakingResponseSeconds = item && isSpeakingItem ? getSpeakingResponseSeconds(item) : 0;
+  const speakingVolumeControl = getSpeakingVolumeControl(volume, volumeOpen, setVolume, setVolumeOpen);
+
+  const reviewEntries =
+    section.section_type === 'reading' && mod
+      ? buildReadingReviewEntries(mod.items, answers)
+      : mod?.items.map((it, i) => ({
+          label: `Question ${i + 1}`,
+          itemIdx: i,
+          answered: !!answers[it.id],
+        })) ?? [];
+
   const renderItem = () => {
     if (!item) return null;
     const ans = answers[item.id] as Record<string, unknown> | undefined;
 
     if (item.item_type === 'reading_fill_blank') {
       const template = String(item.content.template ?? '');
-      const blanks = (ans?.blanks as string[]) ?? Array(Number(item.content.blank_count ?? 10)).fill('');
+      const blankCount = Number(item.content.blank_count ?? 10);
+      const blanks = (ans?.blanks as string[]) ?? Array(blankCount).fill('');
       return (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">{String(item.content.instructions)}</p>
-          <div className="leading-8">
-            {template.split(/(\{\{\d+\}\})/).map((part, i) => {
-              const m = part.match(/\{\{(\d+)\}\}/);
-              if (!m) return <span key={i}>{part}</span>;
-              const idx = Number(m[1]) - 1;
-              return (
-                <input
-                  key={i}
-                  className="border-b-2 border-slate-800 mx-1 w-24 text-center"
-                  value={blanks[idx] ?? ''}
-                  onChange={(e) => {
-                    const next = [...blanks];
-                    next[idx] = e.target.value;
-                    void saveAnswer(item.id, { blanks: next });
-                  }}
-                />
-              );
-            })}
-          </div>
-        </div>
+        <ReadingFillBlankQuestion
+          instructions={String(item.content.instructions ?? '')}
+          template={template}
+          content={item.content}
+          blanks={blanks}
+          onChange={(next) => void saveAnswer(item.id, { blanks: next })}
+        />
       );
     }
 
@@ -287,6 +495,21 @@ export default function ExamRunnerPage() {
       const selected = ans?.selected_option_index as number | undefined;
       const options = (item.content.options as string[]) ?? [];
       const stimulus = item.content.stimulus_text as string | undefined;
+
+      if (section?.section_type === 'reading' && item.item_type === 'reading_single_choice') {
+        const { start, end } = getReadingChoiceGroupBounds(mod?.items ?? [], itemIdx);
+        const groupItems = (mod?.items ?? []).slice(start, end + 1);
+        return (
+          <ReadingChoiceGroupQuestion
+            groupItems={groupItems}
+            answers={answers}
+            onSelect={(itemId, optionIndex) =>
+              void saveAnswer(itemId, { selected_option_index: optionIndex })
+            }
+          />
+        );
+      }
+
       return (
         <div className="grid md:grid-cols-2 gap-6">
           <div className="bg-slate-50 p-4 rounded border overflow-auto max-h-[60vh]">
@@ -362,73 +585,26 @@ export default function ExamRunnerPage() {
 
     if (item.item_type === 'writing_email' || item.item_type === 'writing_academic_discussion') {
       const text = (ans?.text as string) ?? '';
-      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-      const [hideCount, setHideCount] = useState(false);
       return (
-        <div className="grid md:grid-cols-2 gap-6 h-[calc(100vh-120px)]">
-          <div className="overflow-auto p-4 bg-slate-50 border rounded text-sm space-y-3">
-            {item.item_type === 'writing_email' ? (
-              <>
-                <p>{String(item.content.scenario)}</p>
-                <ul className="list-disc pl-5">
-                  {((item.content.task_points as string[]) ?? []).map((t) => (
-                    <li key={t}>{t}</li>
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <>
-                <p>{String(item.content.context)}</p>
-                <p className="font-medium">{String(item.content.professor_question)}</p>
-                {((item.content.student_posts as { name: string; text: string }[]) ?? []).map((p) => (
-                  <div key={p.name} className="border-t pt-2">
-                    <p className="font-semibold">{p.name}</p>
-                    <p>{p.text}</p>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-          <div className="flex flex-col">
-            {item.item_type === 'writing_email' && (
-              <div className="text-sm mb-2 space-y-1">
-                <p>To: {String(item.content.to)}</p>
-                <p>Subject: {String(item.content.subject)}</p>
-              </div>
-            )}
-            <textarea
-              className="flex-1 border rounded p-3 font-mono text-sm"
-              value={text}
-              onChange={(e) => void saveAnswer(item.id, { text: e.target.value })}
-            />
-            <div className="flex justify-between items-center mt-2 text-sm">
-              <button type="button" className="exam-btn-primary text-xs px-2 py-1" onClick={() => setHideCount((v) => !v)}>
-                {hideCount ? 'Show Word Count' : 'Hide Word Count'}
-              </button>
-              {!hideCount && <span>Word count: {words}</span>}
-              <span className="text-slate-500">{saveStatus}</span>
-            </div>
-          </div>
-        </div>
+        <WritingEssayQuestion
+          item={item}
+          text={text}
+          saveStatus={saveStatus}
+          onChange={(next) => void saveAnswer(item.id, { text: next })}
+        />
       );
     }
 
     if (item.item_type.startsWith('speaking_')) {
       return (
-        <div className="text-center space-y-6 py-12">
-          {item.content.question_text && <p className="text-lg max-w-2xl mx-auto">{String(item.content.question_text)}</p>}
-          <p className="text-sm text-slate-600" role="status">
-            {speakingPhase === 'playing' && 'Playing prompt...'}
-            {speakingPhase === 'recording' && 'Recording - speak now'}
-            {speakingPhase === 'uploading' && 'Uploading recording...'}
-            {speakingPhase === 'recording' && itemTimer <= 5 && 'Stop Speaking'}
-          </p>
-          {speakingPhase === 'recording' && (
-            <button type="button" className="exam-btn-primary" onClick={() => void stopSpeaking()}>
-              Stop Speaking
-            </button>
-          )}
-        </div>
+        <SpeakingQuestionPanel
+          item={item}
+          moduleDescription={mod?.description}
+          speakingPhase={speakingPhase}
+          responseSeconds={speakingResponseSeconds}
+          responseRemaining={speakingPhase === 'recording' ? speakingResponseRemaining : speakingResponseSeconds}
+          onStopSpeaking={() => stopSpeaking(false)}
+        />
       );
     }
 
@@ -436,6 +612,28 @@ export default function ExamRunnerPage() {
   };
 
   if (phase === 'section_intro') {
+    if (section.section_type === 'reading') {
+      return (
+        <ExamFlowShell sectionLabel="Reading" showVolume={false} actionLabel="Begin" onContinue={startSection}>
+          <ReadingSectionIntro />
+        </ExamFlowShell>
+      );
+    }
+
+    if (section.section_type === 'speaking') {
+      return (
+        <ExamFlowShell
+          sectionLabel="Speaking"
+          showVolume
+          volumeControl={speakingVolumeControl}
+          actionLabel="Begin"
+          onContinue={startSection}
+        >
+          <SpeakingSectionIntro />
+        </ExamFlowShell>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-white">
         <ExamTopBar sectionName={section.title} questionLabel="" showTimer={false} onToggleTimer={() => {}} />
@@ -453,7 +651,74 @@ export default function ExamRunnerPage() {
     );
   }
 
+  if (phase === 'module_end' && mod) {
+    if (section.section_type === 'reading') {
+      const nextModule = section.modules[moduleIdx + 1];
+      return (
+        <ExamFlowShell
+          sectionLabel="Reading"
+          showVolume={false}
+          actionLabel="Next"
+          onContinue={continueFromModuleEnd}
+        >
+          <ReadingModuleEnd
+            moduleOrder={mod.order_no}
+            nextModuleOrder={nextModule?.order_no ?? moduleIdx + 2}
+          />
+        </ExamFlowShell>
+      );
+    }
+
+    if (section.section_type === 'speaking') {
+      const nextModule = section.modules[moduleIdx + 1];
+      return (
+        <ExamFlowShell
+          sectionLabel="Speaking"
+          showVolume
+          volumeControl={speakingVolumeControl}
+          actionLabel="Next"
+          onContinue={continueFromModuleEnd}
+        >
+          <SpeakingModuleEnd
+            moduleOrder={mod.order_no}
+            nextModuleOrder={nextModule?.order_no ?? moduleIdx + 2}
+          />
+        </ExamFlowShell>
+      );
+    }
+  }
+
   if (phase === 'module_intro' && mod) {
+    if (section.section_type === 'reading') {
+      return (
+        <ExamFlowShell sectionLabel="Reading" showVolume={false} actionLabel="Begin" onContinue={startModule}>
+          <ReadingModuleIntro
+            moduleOrder={mod.order_no}
+            hasNextModuleInSection={moduleIdx < section.modules.length - 1}
+          />
+        </ExamFlowShell>
+      );
+    }
+
+    if (section.section_type === 'speaking') {
+      return (
+        <ExamFlowShell
+          sectionLabel="Speaking"
+          showVolume
+          volumeControl={speakingVolumeControl}
+          actionLabel="Begin"
+          onContinue={continueFromModuleIntro}
+        >
+          <SpeakingModuleIntro
+            title={mod.title}
+            description={mod.description}
+            moduleType={mod.module_type}
+            step={mod.module_type === 'speaking_listen_repeat' ? 'directions' : 'default'}
+          />
+        </ExamFlowShell>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-white">
         <ExamTopBar sectionName={section.title} questionLabel={mod.title} showTimer={false} onToggleTimer={() => {}} />
@@ -468,7 +733,53 @@ export default function ExamRunnerPage() {
     );
   }
 
+  if (phase === 'module_scenario' && mod && section.section_type === 'speaking') {
+    return (
+      <ExamFlowShell
+        sectionLabel="Speaking"
+        showVolume
+        volumeControl={speakingVolumeControl}
+        actionLabel="Begin"
+        onContinue={startModule}
+      >
+        <SpeakingModuleIntro
+          title={mod.title}
+          description={mod.description}
+          moduleType={mod.module_type}
+          step="scenario"
+        />
+      </ExamFlowShell>
+    );
+  }
+
   if (phase === 'section_end') {
+    if (section.section_type === 'reading') {
+      return (
+        <ExamFlowShell
+          sectionLabel="Reading"
+          showVolume={false}
+          actionLabel="Next"
+          onContinue={nextSection}
+        >
+          <ReadingSectionEnd />
+        </ExamFlowShell>
+      );
+    }
+
+    if (section.section_type === 'speaking') {
+      return (
+        <ExamFlowShell
+          sectionLabel="Speaking"
+          showVolume
+          volumeControl={speakingVolumeControl}
+          actionLabel="Next"
+          onContinue={() => void finishExam()}
+        >
+          <SpeakingSectionEnd />
+        </ExamFlowShell>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-white">
         <ExamTopBar sectionName={section.title} questionLabel="End of Section" showTimer={false} onToggleTimer={() => {}} />
@@ -484,49 +795,77 @@ export default function ExamRunnerPage() {
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
-      <ExamTopBar
-        sectionName={section.title}
-        questionLabel={questionLabel}
-        timerSeconds={timer}
-        showTimer={showTimer}
-        onToggleTimer={() => setShowTimer((v) => !v)}
-        onReview={section.section_type === 'reading' ? () => setReviewOpen(true) : undefined}
-        onBack={mod.allow_back && section.section_type !== 'listening' ? goBack : undefined}
-        onNext={section.section_type === 'speaking' && speakingPhase !== 'idle' ? undefined : goNext}
-        backDisabled={itemIdx === 0}
-        extra={
-          section.section_type === 'listening' || section.section_type === 'speaking' ? (
-            <label className="exam-btn flex items-center gap-1">
-              Volume
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.1}
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
-              />
-            </label>
-          ) : undefined
-        }
-      />
-      <main className="flex-1 p-6 overflow-auto">{renderItem()}</main>
+      {isReadingItem ? (
+        <ReadingExamTopBar
+          sectionName="Reading"
+          questionLabel={questionLabel}
+          timerSeconds={moduleTimer}
+          showTimer={showTimer}
+          onToggleTimer={() => setShowTimer((v) => !v)}
+          onReview={() => setReviewOpen(true)}
+          onBack={mod.allow_back ? goBack : undefined}
+          onNext={goNext}
+          backDisabled={itemIdx === 0}
+        />
+      ) : isSpeakingItem ? (
+        <SpeakingExamTopBar
+          questionLabel={questionLabel}
+          timerSeconds={speakingPhase === 'recording' ? speakingResponseRemaining : speakingResponseSeconds}
+          showTimer={showTimer && speakingPhase !== 'idle'}
+          onToggleTimer={() => setShowTimer((v) => !v)}
+          volume={volume}
+          volumeOpen={volumeOpen}
+          onToggleVolume={() => setVolumeOpen((open) => !open)}
+          onVolumeChange={setVolume}
+          onNext={goNext}
+          nextDisabled={speakingPhase !== 'idle'}
+        />
+      ) : (
+        <ExamTopBar
+          sectionName={section.title}
+          questionLabel={questionLabel}
+          timerSeconds={timer}
+          showTimer={showTimer}
+          onToggleTimer={() => setShowTimer((v) => !v)}
+          onReview={section.section_type === 'reading' ? () => setReviewOpen(true) : undefined}
+          onBack={mod.allow_back && section.section_type !== 'listening' ? goBack : undefined}
+          onNext={goNext}
+          backDisabled={itemIdx === 0}
+          extra={
+            section.section_type === 'listening' ? (
+              <label className="exam-btn flex items-center gap-1">
+                Volume
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  value={volume}
+                  onChange={(e) => setVolume(Number(e.target.value))}
+                />
+              </label>
+            ) : undefined
+          }
+        />
+      )}
+      <main className={`flex-1 overflow-auto ${isReadingItem || isSpeakingItem ? '' : 'p-6'}`}>{renderItem()}</main>
+      <SpeakingStopDialog open={showSpeakingStopDialog} />
       {reviewOpen && mod && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <h3 className="font-semibold mb-3">Review</h3>
-            <ul className="space-y-1 text-sm">
-              {mod.items.map((it, i) => (
-                <li key={it.id}>
+            <ul className="space-y-1 text-sm max-h-[60vh] overflow-y-auto">
+              {reviewEntries.map((entry, i) => (
+                <li key={`${entry.itemIdx}-${entry.label}-${i}`}>
                   <button
                     type="button"
                     className="text-left w-full hover:underline"
                     onClick={() => {
-                      setItemIdx(i);
+                      setItemIdx(entry.itemIdx);
                       setReviewOpen(false);
                     }}
                   >
-                    Q{i + 1} {answers[it.id] ? '(answered)' : '(unanswered)'}
+                    {entry.label} {entry.answered ? '(answered)' : '(unanswered)'}
                   </button>
                 </li>
               ))}

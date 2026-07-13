@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ExamItemDto } from '../../../api/client';
+import SpeakingInterviewerPortrait from '../../../components/exam/SpeakingInterviewerPortrait';
 
 type Phase = 'ready' | 'playing_prompt' | 'recording' | 'uploading' | 'done' | 'error';
 
@@ -22,6 +23,7 @@ export default function SpeakingItem({ item, volume, alreadyAnswered, onUpload, 
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
   const responseSeconds = Number(item.content.response_seconds ?? 45);
+  const isInterview = item.item_type === 'speaking_interview';
   const questionText = item.content.question_text as string | null;
   const promptAudio = item.assets.find((a) => a.asset_type === 'audio');
 
@@ -111,10 +113,16 @@ export default function SpeakingItem({ item, volume, alreadyAnswered, onUpload, 
 
   return (
     <div className="max-w-3xl mx-auto text-center">
-      {questionText && (
-        <div className="card p-6 mb-8 text-left">
-          <p className="text-[15px] leading-7 whitespace-pre-wrap">{questionText}</p>
+      {isInterview ? (
+        <div className="mb-8">
+          <SpeakingInterviewerPortrait />
         </div>
+      ) : (
+        questionText && (
+          <div className="card p-6 mb-8 text-left">
+            <p className="text-[15px] leading-7 whitespace-pre-wrap">{questionText}</p>
+          </div>
+        )
       )}
 
       {phase === 'ready' && (

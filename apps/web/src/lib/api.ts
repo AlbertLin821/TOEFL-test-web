@@ -93,6 +93,7 @@ export interface AvailableExam {
   attempts_used: number;
   status: string;
   active_attempt_id: string | null;
+  active_attempt_status: string | null;
   latest_attempt_id: string | null;
 }
 

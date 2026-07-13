@@ -9,18 +9,437 @@ body {
   color: #0f172a;
 }
 
-.exam-disabled-option {
-  @apply opacity-40 pointer-events-none cursor-not-allowed;
-}
+@layer components {
+  .exam-disabled-option {
+    @apply opacity-40 pointer-events-none cursor-not-allowed;
+  }
 
-.exam-topbar {
-  @apply bg-exam-bar text-white flex items-center justify-between px-4 py-2 text-sm;
-}
+  .exam-topbar {
+    @apply bg-exam-bar text-white flex items-center justify-between px-4 py-2 text-sm;
+  }
 
-.exam-btn {
-  @apply px-3 py-1 rounded border border-white/30 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed;
-}
+  .exam-btn {
+    @apply px-3 py-1 rounded border border-white/30 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
 
-.exam-btn-primary {
-  @apply px-4 py-2 rounded bg-exam-accent text-white hover:bg-blue-700 disabled:opacity-40;
+  .exam-btn-primary {
+    @apply px-4 py-2 rounded bg-exam-accent text-white hover:opacity-90 disabled:opacity-40;
+  }
+
+  .exam-flow-header {
+    @apply bg-exam-bar text-white flex items-center justify-between px-4 py-2;
+  }
+
+  .exam-flow-exit {
+    @apply bg-white text-red-600 font-semibold px-4 py-1.5 rounded-md text-sm hover:bg-gray-50;
+  }
+
+  .exam-flow-header-btn {
+    @apply flex items-center gap-1.5 px-3 py-1.5 rounded border border-white/60 text-sm hover:bg-white/10;
+  }
+
+  .exam-flow-continue {
+    @apply flex items-center gap-1 bg-white text-exam-bar font-medium px-4 py-1.5 rounded-md border border-exam-bar text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .exam-flow-subheader {
+    @apply bg-[#f0f0f0] text-slate-700 px-4 py-2 text-sm font-medium border-b border-slate-200;
+  }
+
+  .exam-flow-title {
+    @apply text-3xl font-normal text-slate-700 pb-3 border-b border-slate-300;
+  }
+
+  .exam-flow-content {
+    @apply max-w-5xl mx-auto px-8 py-8;
+  }
+
+  .exam-flow-success-continue {
+    @apply bg-exam-bar text-white px-8 py-2.5 rounded-md font-medium hover:opacity-90;
+    box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #005858;
+  }
+
+  .exam-section-task-table {
+    @apply border border-slate-800 text-sm text-slate-800;
+    border-collapse: collapse;
+  }
+
+  .exam-section-task-table th,
+  .exam-section-task-table td {
+    @apply border border-slate-800 px-4 py-3 text-left align-top;
+  }
+
+  .exam-section-task-table th {
+    @apply font-semibold;
+    background-color: #b6e2b6;
+  }
+
+  .reading-section-intro-title {
+    @apply text-4xl;
+  }
+
+  .reading-section-intro-body {
+    @apply text-xl leading-9 text-slate-700;
+  }
+
+  .reading-section-intro-table {
+    @apply text-lg;
+  }
+
+  .reading-section-intro-table th,
+  .reading-section-intro-table td {
+    @apply px-5 py-4;
+  }
+
+  .speaking-section-intro-title {
+    @apply text-4xl;
+  }
+
+  .speaking-section-intro-body {
+    @apply text-xl leading-9 text-slate-700;
+  }
+
+  .speaking-section-intro-table {
+    @apply text-lg;
+  }
+
+  .speaking-section-intro-table th,
+  .speaking-section-intro-table td {
+    @apply px-5 py-4;
+  }
+
+  .speaking-section-intro-table th {
+    background-color: #c9a89a;
+  }
+
+  .reading-section-end-title {
+    @apply text-4xl;
+  }
+
+  .reading-section-end-body {
+    @apply text-xl leading-9 text-slate-700;
+  }
+
+  .exam-reading-toolbar {
+    @apply bg-exam-bar flex items-center justify-between px-4 py-2;
+  }
+
+  .exam-reading-review-btn {
+    @apply flex items-center gap-1.5 px-4 py-1.5 rounded text-white font-medium text-sm hover:opacity-90;
+    background-color: #4a9d4a;
+  }
+
+  .exam-reading-back-btn {
+    @apply flex items-center gap-0.5 px-4 py-1.5 rounded text-white font-medium text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed;
+    background-color: #003d3d;
+  }
+
+  .exam-reading-next-btn {
+    @apply flex items-center gap-0.5 px-4 py-1.5 rounded bg-white text-exam-bar font-medium text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .exam-reading-subheader {
+    @apply flex items-center justify-between px-4 py-2 bg-white border-b border-slate-200 text-sm text-slate-800;
+  }
+
+  .exam-reading-hide-time-btn {
+    @apply flex items-center gap-1.5 px-2 py-1 rounded border border-slate-300 text-slate-700 text-sm hover:bg-slate-50;
+  }
+
+  .reading-fill-content {
+    @apply w-full max-w-7xl mx-auto px-12 py-12;
+  }
+
+  .reading-fill-heading {
+    @apply mb-10 space-y-2;
+  }
+
+  .reading-fill-title {
+    @apply font-bold text-2xl text-slate-900;
+  }
+
+  .reading-fill-subtitle {
+    @apply font-bold text-2xl text-slate-900;
+  }
+
+  .reading-fill-paragraph {
+    @apply text-xl leading-10 text-slate-900;
+  }
+
+  .reading-blank-group {
+    @apply inline whitespace-nowrap;
+  }
+
+  .reading-blank-prefix {
+    @apply inline;
+  }
+
+  .reading-blank-box {
+    display: inline-flex;
+    align-items: center;
+    position: relative;
+    vertical-align: baseline;
+    background-color: #d9d9d9;
+    padding: 0 0.25rem;
+    margin: 0 0.125rem;
+    min-height: 1.35em;
+    cursor: text;
+  }
+
+  .reading-blank-box:focus-within {
+    outline: 2px solid #005858;
+    outline-offset: 1px;
+  }
+
+  .reading-blank-slots {
+    display: inline-flex;
+    align-items: center;
+    font: inherit;
+    letter-spacing: 0.05em;
+    line-height: 1.35;
+  }
+
+  .reading-blank-underscore {
+    color: #374151;
+  }
+
+  .reading-blank-letter {
+    color: #0f172a;
+    font-weight: 500;
+  }
+
+  .reading-blank-input-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: text;
+    border: none;
+    background: transparent;
+  }
+
+  .reading-choice-content {
+    @apply w-full max-w-[1400px] mx-auto px-10 py-10;
+  }
+
+  .reading-choice-instructions {
+    @apply text-center font-bold text-2xl text-slate-900 mb-8;
+  }
+
+  .reading-choice-split {
+    @apply grid grid-cols-1 lg:grid-cols-2 gap-8 items-start;
+  }
+
+  .reading-choice-passage-panel {
+    @apply border border-slate-900 bg-white overflow-y-auto;
+    max-height: calc(100vh - 220px);
+  }
+
+  .reading-choice-passage-inner {
+    @apply p-8;
+  }
+
+  .reading-email-panel {
+    @apply bg-slate-100 border-b border-slate-400 p-6 min-h-full;
+  }
+
+  .reading-email-subject-row {
+    @apply flex border border-slate-500 bg-white mb-5;
+  }
+
+  .reading-email-subject-label {
+    @apply border-r border-slate-500 px-4 py-2.5 text-lg text-slate-900 shrink-0;
+  }
+
+  .reading-email-subject-value {
+    @apply flex-1 px-4 py-2.5 text-lg font-semibold text-slate-900;
+  }
+
+  .reading-email-body {
+    @apply border border-slate-500 bg-white p-8 text-lg leading-9 text-slate-900 whitespace-pre-wrap;
+  }
+
+  .reading-choice-passage-title {
+    @apply text-center font-bold uppercase text-lg text-slate-900 mb-6 tracking-wide;
+  }
+
+  .reading-choice-passage-heading {
+    @apply text-center font-bold text-xl text-slate-900 mb-6 leading-snug;
+  }
+
+  .reading-choice-passage-body {
+    @apply text-lg leading-9 text-slate-900 whitespace-pre-wrap;
+  }
+
+  .reading-choice-answer-panel {
+    @apply pt-2 lg:pt-6 overflow-y-auto;
+    max-height: calc(100vh - 220px);
+  }
+
+  .reading-split-questions {
+    @apply space-y-10;
+  }
+
+  .reading-group-question-text {
+    @apply text-xl leading-9 text-slate-900 mb-5 whitespace-pre-wrap;
+  }
+
+  .reading-choice-options {
+    @apply list-none m-0 space-y-6;
+  }
+
+  .reading-choice-option {
+    @apply flex items-center gap-5 cursor-pointer rounded-sm;
+  }
+
+  .reading-choice-option:focus-within .reading-choice-radio {
+    @apply ring-2 ring-exam-bar ring-offset-2;
+  }
+
+  .reading-choice-radio {
+    @apply relative shrink-0 flex items-center justify-center rounded-full border-2 border-slate-700 bg-white;
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .reading-choice-radio-selected {
+    @apply border-slate-800;
+  }
+
+  .reading-choice-radio-dot {
+    @apply rounded-full bg-slate-800;
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .reading-choice-option-text {
+    @apply text-xl leading-8 text-slate-900;
+  }
+
+  .speaking-question-content {
+    @apply w-full max-w-5xl mx-auto px-10 py-10 space-y-8;
+  }
+
+  .speaking-question-instructions {
+    @apply text-center font-bold text-2xl text-slate-900;
+  }
+
+  .speaking-module-intro-visual {
+    @apply space-y-10 pt-4;
+  }
+
+  .speaking-module-scenario {
+    @apply text-center text-xl leading-9 text-slate-800 max-w-4xl mx-auto;
+  }
+
+  .speaking-weather-grid {
+    @apply grid grid-cols-3 gap-0 border border-slate-800 max-w-3xl mx-auto bg-white;
+  }
+
+  .speaking-weather-grid-grayscale {
+    filter: grayscale(1);
+  }
+
+  .speaking-weather-cell {
+    @apply flex flex-col items-center justify-center gap-2 border border-slate-800 p-6 min-h-[9rem] text-slate-700;
+  }
+
+  .speaking-weather-cell-highlighted {
+    @apply border-4 border-orange-500 bg-orange-50/40;
+    filter: none;
+  }
+
+  .speaking-weather-icon {
+    @apply w-16 h-12 text-slate-700;
+  }
+
+  .speaking-weather-icon-muted {
+    @apply text-slate-500;
+  }
+
+  .speaking-weather-icon-accent {
+    @apply text-orange-600;
+  }
+
+  .speaking-weather-label {
+    @apply text-lg font-semibold text-slate-800;
+  }
+
+  .speaking-weather-label-highlighted {
+    @apply inline-flex rounded-full bg-orange-500 px-4 py-1 text-white;
+  }
+
+  .speaking-weather-detail {
+    @apply text-base text-slate-600;
+  }
+
+  .speaking-weather-temperature,
+  .speaking-weather-wind {
+    @apply flex flex-col items-center gap-3 text-lg font-medium text-slate-800;
+  }
+
+  .speaking-response-time {
+    @apply max-w-sm mx-auto mt-8 border border-slate-500 overflow-hidden;
+  }
+
+  .speaking-response-time-header {
+    @apply bg-slate-600 text-white text-sm font-semibold tracking-wide text-center py-2;
+  }
+
+  .speaking-response-time-body {
+    @apply flex items-center justify-center gap-3 bg-white py-4 text-2xl text-slate-800;
+  }
+
+  .speaking-highlight-panel {
+    @apply border border-slate-900 bg-white p-6;
+  }
+
+  .speaking-highlight-map {
+    @apply mx-auto bg-slate-100 border border-slate-400;
+    width: min(100%, 42rem);
+    aspect-ratio: 16 / 9;
+  }
+
+  .speaking-interviewer-portrait {
+    @apply mx-auto max-w-lg border border-slate-900 overflow-hidden bg-white;
+  }
+
+  .speaking-interviewer-portrait img {
+    @apply block w-full h-auto object-cover;
+    aspect-ratio: 4 / 3;
+  }
+
+  .speaking-status-panel {
+    @apply border border-slate-300 bg-slate-50 p-8 text-center;
+  }
+
+  .speaking-status-title {
+    @apply text-2xl font-semibold text-slate-800;
+  }
+
+  .speaking-status-recording {
+    @apply text-red-700;
+  }
+
+  .speaking-status-body {
+    @apply mt-3 text-lg leading-8 text-slate-600;
+  }
+
+  .speaking-stop-dialog-overlay {
+    @apply fixed inset-0 flex items-center justify-center bg-black/40 p-4;
+    z-index: 9999;
+  }
+
+  .speaking-stop-dialog {
+    @apply bg-white rounded-lg shadow-lg w-full max-w-lg overflow-hidden;
+  }
+
+  .speaking-stop-dialog-title {
+    @apply px-8 py-5 text-2xl font-normal text-slate-700 border-b border-slate-300;
+  }
+
+  .speaking-stop-dialog-body {
+    @apply px-8 py-10 text-center text-lg leading-9 text-slate-600 space-y-1;
+  }
 }

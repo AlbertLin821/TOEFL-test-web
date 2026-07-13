@@ -71,6 +71,7 @@ attemptsRouter.get('/student/available-exams', requireRole('student'), async (re
           attempts_used: a.attempts.length,
           status,
           active_attempt_id: active?.id ?? null,
+          active_attempt_status: active?.status ?? null,
           latest_attempt_id: latestFinished?.id ?? active?.id ?? null,
         };
       }),

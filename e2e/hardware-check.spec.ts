@@ -12,9 +12,9 @@ test.describe('E2E hardware check', () => {
     test.skip(!(await startButton.isVisible().catch(() => false)), 'No available exam to start');
 
     await startButton.click();
-    await expect(page).toHaveURL(/\/hardware/);
+    await expect(page).toHaveURL(/\/exam\/[^/]+$/);
+    await expect(page.getByRole('heading', { name: 'Hardware Check' })).toBeVisible();
     await completeHardwareCheck(page);
-    await expect(page).not.toHaveURL(/\/hardware/);
     await expect(page.getByRole('button', { name: 'Begin' }).first()).toBeVisible();
   });
 });

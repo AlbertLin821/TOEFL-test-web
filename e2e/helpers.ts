@@ -56,12 +56,15 @@ export async function loginAsStudent(page: Page): Promise<void> {
 }
 
 export async function completeHardwareCheck(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('button', { name: 'Play test sound' }).click();
-  await page.getByRole('button', { name: 'Continue to microphone test' }).click();
-  await page.getByRole('button', { name: 'RECORD' }).click();
-  await expect(page.getByText('Success')).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: /Continue/i }).first().click();
+  await expect(page.getByRole('heading', { name: 'Adjust the volume' })).toBeVisible();
+  await page.getByRole('button', { name: /Continue/i }).first().click();
+  await expect(page.getByRole('heading', { name: 'Adjusting the Microphone' })).toBeVisible();
+  await page.getByRole('button', { name: /Continue/i }).first().click();
+  await page.getByRole('button', { name: 'Record' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByText('Your microphone volume has been successfully adjusted.')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Continue' }).click();
 }
 
 export async function advanceExamToSubmit(page: Page): Promise<void> {
@@ -199,6 +202,10 @@ export async function startOrResumeAttempt(page: Page): Promise<{ attemptId: str
   }
 
   if (page.url().includes('/hardware')) {
+    await page.goto(page.url().replace('/hardware', ''));
+  }
+
+  if (await page.getByRole('heading', { name: 'Hardware Check' }).isVisible().catch(() => false)) {
     await completeHardwareCheck(page);
   }
 

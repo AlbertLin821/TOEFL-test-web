@@ -4,11 +4,14 @@
   "private": true,
   "description": "TOEFL-style four-skill English mock test platform (B2B multi-tenant SaaS). Not affiliated with ETS.",
   "scripts": {
+    "dev": "concurrently -n api,worker,web -c blue,magenta,green \"pnpm dev:api\" \"pnpm dev:worker\" \"pnpm dev:web\"",
+    "dev:stack": "docker compose up -d && pnpm dev",
     "dev:api": "pnpm --filter api dev",
     "dev:web": "pnpm --filter web dev",
     "dev:worker": "pnpm --filter grading-worker dev",
     "db:migrate": "pnpm --filter @toefl/database migrate:dev",
     "db:seed": "pnpm --filter @toefl/database seed",
+    "dev:reset-student": "pnpm --filter @toefl/database exec dotenv -e ../../.env -- tsx prisma/reset-student-attempt.ts",
     "test": "pnpm -r --if-present test",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
@@ -18,7 +21,8 @@
   },
   "packageManager": "pnpm@10.33.2",
   "devDependencies": {
-    "@playwright/test": "^1.51.0"
+    "@playwright/test": "^1.51.0",
+    "concurrently": "^10.0.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

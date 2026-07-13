@@ -20,8 +20,11 @@ export default function AvailableExamsPage() {
 
   const start = async (assignmentId: string) => {
     const res = await api.startAttempt(assignmentId);
-    if (res.status === 'hardware_check') navigate(`/exam/${res.attempt_id}/hardware`);
-    else navigate(`/exam/${res.attempt_id}`);
+    navigate(`/exam/${res.attempt_id}`);
+  };
+
+  const continueAttempt = (attemptId: string) => {
+    navigate(`/exam/${attemptId}`);
   };
 
   return (
@@ -56,8 +59,12 @@ export default function AvailableExamsPage() {
                 </button>
               )}
               {exam.status === 'in_progress' && exam.active_attempt_id && (
-                <button type="button" className="exam-btn-primary" onClick={() => navigate(`/exam/${exam.active_attempt_id}`)}>
-                  繼續
+                <button
+                  type="button"
+                  className="exam-btn-primary"
+                  onClick={() => continueAttempt(exam.active_attempt_id!)}
+                >
+                  {exam.active_attempt_status === 'hardware_check' ? '繼續硬體檢查' : '繼續'}
                 </button>
               )}
               {(exam.status === 'report_ready' || exam.status === 'grading') && exam.latest_attempt_id && (

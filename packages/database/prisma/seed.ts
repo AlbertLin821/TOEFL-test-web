@@ -10,7 +10,8 @@ import {
   READING_M1_FILL,
   READING_M1_CHOICES,
   READING_M2_FILL,
-  READING_M2_CHOICES,
+  READING_M2_Q11_20,
+  READING_M2_Q13_15,
   LISTENING_M1,
   LISTENING_M2,
   BUILD_A_SENTENCE,
@@ -63,6 +64,217 @@ async function uploadAudio(relPath: string): Promise<{ storageKey: string; check
   return { storageKey, checksum };
 }
 
+/** Add reading single-choice items (Q11+) when missing for a module. */
+async function syncReadingModuleChoices(
+  moduleTitle: string,
+  choices: typeof READING_M1_CHOICES,
+) {
+  const mod = await prisma.examModule.findFirst({
+    where: { title: moduleTitle, section: { sectionType: 'reading' } },
+    include: {
+      items: {
+        where: { itemType: 'reading_single_choice' },
+        orderBy: { orderNo: 'asc' },
+      },
+    },
+  });
+  if (!mod) return;
+
+  const existingCount = mod.items.length;
+  if (existingCount >= choices.length) {
+    console.log(`${moduleTitle} already has ${existingCount} choice items.`);
+    return;
+  }
+
+  const fillItem = await prisma.examItem.findFirst({
+    where: { moduleId: mod.id, itemType: 'reading_fill_blank' },
+    select: { orderNo: true },
+  });
+  const baseOrder = fillItem?.orderNo ?? 1;
+
+  for (let i = existingCount; i < choices.length; i++) {
+    const c = choices[i];
+    const item = await prisma.examItem.create({
+      data: {
+        moduleId: mod.id,
+        itemType: 'reading_single_choice',
+        orderNo: baseOrder + 1 + i,
+        gradingType: 'auto',
+        scoreMax: new Prisma.Decimal(1),
+        contentJson: {
+          instructions: c.instructions ?? null,
+          stimulus_title: c.stimulusTitle ?? null,
+          stimulus_text: c.stimulusText ?? null,
+          question_text: c.questionText,
+          options: c.options,
+          question_number: i + 11,
+        },
+      },
+    });
+    await prisma.answerKey.create({
+      data: {
+        examItemId: item.id,
+        answerJson: { correct_option_index: c.correctIndex },
+      },
+    });
+  }
+
+  console.log(
+    `Added ${choices.length - existingCount} choice item(s) to ${moduleTitle} (Q${existingCount + 11}+).`,
+  );
+}
+
+/** Sync reading module fill-blank and choice answer keys from seed data. */
+async function syncReadingModuleAnswers(
+  moduleTitle: string,
+  fill: typeof READING_M1_FILL,
+  choices: typeof READING_M1_CHOICES,
+) {
+  const mod = await prisma.examModule.findFirst({
+    where: { title: moduleTitle, section: { sectionType: 'reading' } },
+    include: {
+      items: {
+        orderBy: { orderNo: 'asc' },
+        include: { answerKeys: true },
+      },
+    },
+  });
+  if (!mod) return;
+
+  let updated = 0;
+
+  const fillItem = mod.items.find((item) => item.itemType === 'reading_fill_blank');
+  if (fillItem?.answerKeys[0]) {
+    await prisma.answerKey.update({
+      where: { id: fillItem.answerKeys[0].id },
+      data: {
+        answerJson: { answers: fill.answers, case_sensitive: false },
+        scoringRuleJson: { type: 'per_blank_partial' },
+      },
+    });
+    updated += 1;
+  }
+
+  const choiceItems = mod.items.filter((item) => item.itemType === 'reading_single_choice');
+  for (let i = 0; i < Math.min(choiceItems.length, choices.length); i++) {
+    const key = choiceItems[i].answerKeys[0];
+    if (!key) continue;
+
+    const expected = choices[i].correctIndex;
+    const current = (key.answerJson as { correct_option_index?: number }).correct_option_index;
+    if (current !== expected) {
+      await prisma.answerKey.update({
+        where: { id: key.id },
+        data: { answerJson: { correct_option_index: expected } },
+      });
+      updated += 1;
+    }
+  }
+
+  if (updated > 0) {
+    console.log(`Synced ${updated} answer key record(s) for ${moduleTitle}.`);
+  } else {
+    console.log(`${moduleTitle} answer keys already match seed data.`);
+  }
+}
+
+async function syncReadingModule2EmailStimulus() {
+  const mod = await prisma.examModule.findFirst({
+    where: { title: 'Reading Module 2', section: { sectionType: 'reading' } },
+  });
+  if (!mod) return;
+
+  const items = await prisma.examItem.findMany({
+    where: { moduleId: mod.id, itemType: 'reading_single_choice' },
+  });
+  const simmonsText = READING_M2_Q11_20[0].stimulusText;
+  const adamsText = READING_M2_Q13_15[0].stimulusText;
+  let updated = 0;
+
+  for (const item of items) {
+    const content = item.contentJson as Record<string, unknown>;
+    const text = String(content.stimulus_text ?? '');
+
+    if (text.includes('Dear Ms. Simmons') && text !== simmonsText) {
+      await prisma.examItem.update({
+        where: { id: item.id },
+        data: { contentJson: { ...content, stimulus_text: simmonsText } },
+      });
+      updated += 1;
+      continue;
+    }
+
+    if (text.includes('Dear Ms. Adams') && text !== adamsText) {
+      await prisma.examItem.update({
+        where: { id: item.id },
+        data: { contentJson: { ...content, stimulus_text: adamsText } },
+      });
+      updated += 1;
+    }
+  }
+
+  if (updated > 0) {
+    console.log(`Updated ${updated} Reading Module 2 email item(s).`);
+  }
+}
+
+async function syncSpeakingListenRepeatVisuals() {
+  const mod = await prisma.examModule.findFirst({
+    where: { moduleType: 'speaking_listen_repeat' },
+    include: {
+      items: {
+        where: { itemType: 'speaking_listen_repeat' },
+        orderBy: { orderNo: 'asc' },
+      },
+    },
+  });
+  if (!mod) return;
+
+  const description = `${LISTEN_AND_REPEAT_INTRO.instructions}\n\n${LISTEN_AND_REPEAT_INTRO.scenario}`;
+  if (mod.description !== description) {
+    await prisma.examModule.update({
+      where: { id: mod.id },
+      data: { description },
+    });
+    console.log('Updated Listen and Repeat module description.');
+  }
+
+  let updated = 0;
+  for (let i = 0; i < mod.items.length && i < LISTEN_AND_REPEAT.length; i++) {
+    const item = mod.items[i];
+    const seed = LISTEN_AND_REPEAT[i];
+    const content = item.contentJson as Record<string, unknown>;
+    const nextContent = {
+      ...content,
+      visual_type: 'weather_report',
+      highlight_cell: seed.highlightCell,
+    };
+    if (content.visual_type !== nextContent.visual_type || content.highlight_cell !== nextContent.highlight_cell) {
+      await prisma.examItem.update({
+        where: { id: item.id },
+        data: {
+          contentJson: nextContent,
+          timeLimitSeconds: seed.responseSeconds,
+        },
+      });
+      updated += 1;
+      continue;
+    }
+
+    if (item.timeLimitSeconds !== seed.responseSeconds) {
+      await prisma.examItem.update({
+        where: { id: item.id },
+        data: { timeLimitSeconds: seed.responseSeconds },
+      });
+      updated += 1;
+    }
+  }
+
+  if (updated > 0) {
+    console.log(`Updated ${updated} Listen and Repeat visual item(s).`);
+  }
+}
+
 async function main() {
   console.log('Seeding database...');
   const password = await argon2.hash('Password123!');
@@ -107,6 +319,12 @@ async function main() {
   // ---- Exam paper (idempotent: skip if already seeded) ----
   const existingPaper = await prisma.examPaper.findFirst({ where: { title: 'TOEFL-style Mock Test 01' } });
   if (existingPaper) {
+    await syncReadingModuleChoices('Reading Module 1', READING_M1_CHOICES);
+    await syncReadingModuleAnswers('Reading Module 1', READING_M1_FILL, READING_M1_CHOICES);
+    await syncReadingModuleChoices('Reading Module 2', READING_M2_Q11_20);
+    await syncReadingModuleAnswers('Reading Module 2', READING_M2_FILL, READING_M2_Q11_20);
+    await syncReadingModule2EmailStimulus();
+    await syncSpeakingListenRepeatVisuals();
     console.log('Exam paper already seeded, skipping exam creation.');
     return;
   }
@@ -138,7 +356,7 @@ async function main() {
 
   const readingModules = [
     { title: 'Reading Module 1', fill: READING_M1_FILL, choices: READING_M1_CHOICES },
-    { title: 'Reading Module 2', fill: READING_M2_FILL, choices: READING_M2_CHOICES },
+    { title: 'Reading Module 2', fill: READING_M2_FILL, choices: READING_M2_Q11_20 },
   ];
 
   for (let m = 0; m < readingModules.length; m++) {
@@ -169,6 +387,7 @@ async function main() {
           instructions: rm.fill.instructions,
           template: rm.fill.template,
           blank_count: rm.fill.answers.length,
+          missing_lengths: rm.fill.answers.map((answer) => answer.join('').length),
           question_label: 'Questions 1-10',
         },
       },
@@ -443,7 +662,8 @@ async function main() {
         contentJson: {
           question_number: i + 1,
           response_seconds: q.responseSeconds,
-          highlight_image: i >= 2,
+          visual_type: 'weather_report',
+          highlight_cell: q.highlightCell,
           directions_audio_key: i === 0 ? lrDirections.storageKey : null,
         },
       },

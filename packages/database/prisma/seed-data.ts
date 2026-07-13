@@ -30,6 +30,12 @@ export const READING_M1_FILL: FillBlankItemData = {
   answers: [['ey'], ['ticated'], ['tures'], ['uages'], ['nced'], ['ich'], ['em'], ['ive'], ['blish'], ['ade']],
 };
 
+/** Official answer key — Reading Section, Module 1 (Practice Test 1) */
+export const READING_M1_ANSWER_KEY = {
+  fillBlanks: ['ey', 'ticated', 'tures', 'uages', 'nced', 'ich', 'em', 'ive', 'blish', 'ade'],
+  choices: ['B', 'D', 'D', 'B', 'A', 'D', 'C', 'B', 'C', 'A'],
+} as const;
+
 export const READING_M2_FILL: FillBlankItemData = {
   itemType: 'reading_fill_blank',
   instructions: 'Fill in the missing letters in the paragraph. (Questions 1-10)',
@@ -37,6 +43,12 @@ export const READING_M2_FILL: FillBlankItemData = {
     "Consciousness is the state of being aware of and able to think about one's own existence, thoughts, and surroundings. Wh{{1}} you lo{{2}} in a mir{{3}} and recognize your{{4}}, you exh{{5}} self-awareness, wh{{6}} is n{{7}} unique t{{8}} humans b{{9}} is al{{10}} found in dolphins and great apes. Consciousness is not to be confused with cognition. The latter refers to mental processes involved in gaining knowledge and solving problems, like thinking, judging, and remembering.",
   answers: [['en'], ['ok'], ['ror'], ['self'], ['ibit'], ['ich'], ['ot'], ['o'], ['ut'], ['so']],
 };
+
+/** Official answer key — Reading Section, Module 2 (Practice Test 1) */
+export const READING_M2_ANSWER_KEY = {
+  fillBlanks: ['en', 'ok', 'ror', 'self', 'ibit', 'ich', 'ot', 'o', 'ut', 'so'],
+  choices: ['B', 'B', 'C', 'C', 'A', 'B', 'C', 'D', 'A', 'D'],
+} as const;
 
 const NOTICE_TEXT =
   'This is to let all employees know that the staff meeting scheduled for Wednesday, August 10th at 2:00 PM has been rescheduled. The meeting will now take place on Friday, August 12th at 3:00 PM in the main conference room. Please be on time. Thank you.';
@@ -309,6 +321,21 @@ export const READING_M2_CHOICES: ChoiceItemData[] = [
     correctIndex: 3,
   },
 ];
+
+/** Reading Module 2 — email to Ms. Simmons, Questions 11-12 */
+export const READING_M2_Q11_12: ChoiceItemData[] = READING_M2_CHOICES.slice(0, 2);
+
+/** Reading Module 2 — Adams conference email, Questions 13-15 */
+export const READING_M2_Q13_15: ChoiceItemData[] = READING_M2_CHOICES.slice(2, 5);
+
+/** Reading Module 2 — all single-choice items currently enabled (Q11-15) */
+export const READING_M2_Q11_15: ChoiceItemData[] = READING_M2_CHOICES.slice(0, 5);
+
+/** Reading Module 2 — photography passage, Questions 16-20 */
+export const READING_M2_Q16_20: ChoiceItemData[] = READING_M2_CHOICES.slice(5, 10);
+
+/** Reading Module 2 — all single-choice items currently enabled (Q11-20) */
+export const READING_M2_Q11_20: ChoiceItemData[] = READING_M2_CHOICES.slice(0, 10);
 
 const AUDIO_BASE =
   'Teacher Practice Test 1 Audio Files-20260707T125645Z-3-001/Teacher Practice Test 1 Audio Files';
@@ -658,24 +685,68 @@ export interface ListenRepeatItemData {
   expectedText: string;
   responseSeconds: number;
   audioFile: string;
+  highlightCell: WeatherGridCell;
 }
+
+export type WeatherGridCell =
+  | 'morning'
+  | 'afternoon'
+  | 'evening'
+  | 'temperature'
+  | 'wind'
+  | 'outlook';
 
 export const LISTEN_AND_REPEAT_INTRO = {
   instructions:
     'You will listen as someone speaks to you. Listen carefully and then repeat what you have heard. The clock will indicate how much time you have to speak. No time for preparation will be provided.',
   scenario:
-    'You are training to assist visitors at a university orientation event. Listen to the speaker and repeat what she says. Repeat only once.',
+    'You are learning how to give the weather report for the university radio station. Listen to the speaker and repeat what she says. Repeat only once.',
   directionsAudio: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Directions.mp3`,
 };
 
 export const LISTEN_AND_REPEAT: ListenRepeatItemData[] = [
-  { expectedText: 'Welcome to our event.', responseSeconds: 8, audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question1.mp3` },
-  { expectedText: 'Get your name badge at the registration desk.', responseSeconds: 8, audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question2.mp3` },
-  { expectedText: 'Our event is in the auditorium.', responseSeconds: 8, audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question3.mp3` },
-  { expectedText: 'For small group sessions, we will be in the breakout rooms over here.', responseSeconds: 10, audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question4.mp3` },
-  { expectedText: 'Snacks can be found in the vending area throughout the event.', responseSeconds: 10, audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question5.mp3` },
-  { expectedText: 'Please see the information desk if you need an agenda.', responseSeconds: 12, audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question6.mp3` },
-  { expectedText: 'If you want to check session times and locations, please use the schedule provided.', responseSeconds: 12, audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question7.mp3` },
+  {
+    expectedText: 'Welcome to our event.',
+    responseSeconds: 8,
+    audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question1.mp3`,
+    highlightCell: 'morning',
+  },
+  {
+    expectedText: 'Get your name badge at the registration desk.',
+    responseSeconds: 8,
+    audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question2.mp3`,
+    highlightCell: 'afternoon',
+  },
+  {
+    expectedText: 'Our event is in the auditorium.',
+    responseSeconds: 8,
+    audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question3.mp3`,
+    highlightCell: 'evening',
+  },
+  {
+    expectedText: 'For small group sessions, we will be in the breakout rooms over here.',
+    responseSeconds: 10,
+    audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question4.mp3`,
+    highlightCell: 'temperature',
+  },
+  {
+    expectedText: 'Snacks can be found in the vending area throughout the event.',
+    responseSeconds: 10,
+    audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question5.mp3`,
+    highlightCell: 'wind',
+  },
+  {
+    expectedText: 'Please see the information desk if you need an agenda.',
+    responseSeconds: 12,
+    audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question6.mp3`,
+    highlightCell: 'outlook',
+  },
+  {
+    expectedText: 'If you want to check session times and locations, please use the schedule provided.',
+    responseSeconds: 12,
+    audioFile: `${AUDIO_BASE}/Speaking/Listen and Repeat/Speaking_Listen_Repeat_Question7.mp3`,
+    highlightCell: 'morning',
+  },
 ];
 
 export const INTERVIEW_INTRO = {
