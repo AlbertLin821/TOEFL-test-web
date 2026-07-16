@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { scoreFillBlank, scoreSentenceOrder, scoreSingleChoice, toScaledScore } from '../src/scoring.js';
-import { aiGradeResultSchema } from '../src/ai-schema.js';
+import {
+  practiceBandToCefr,
+  scoreFillBlank,
+  scoreSentenceOrder,
+  scoreSingleChoice,
+  scaledScoreToPracticeBand,
+  speakingCompositeToPracticeBand,
+  toScaledScore,
+  writingRawToPracticeBand,
+} from '../src/scoring.js';
+import { constructedGradeBatchSchema } from '../src/ai-schema.js';
 
 describe('scoreSingleChoice', () => {
   it('marks correct answer', () => {
@@ -42,20 +51,51 @@ describe('toScaledScore', () => {
   });
 });
 
-describe('aiGradeResultSchema', () => {
+describe('practice score conversions', () => {
+  it('converts 0-30 scores to the practice 1-6 band', () => {
+    expect(scaledScoreToPracticeBand(0)).toBe(1);
+    expect(scaledScoreToPracticeBand(3)).toBe(1.5);
+    expect(scaledScoreToPracticeBand(27)).toBe(5.5);
+    expect(scaledScoreToPracticeBand(30)).toBe(6);
+  });
+
+  it('uses the Writing raw-20 conversion from the prompt', () => {
+    expect(writingRawToPracticeBand(0)).toBe(1);
+    expect(writingRawToPracticeBand(10)).toBe(3.5);
+    expect(writingRawToPracticeBand(18)).toBe(5.5);
+    expect(writingRawToPracticeBand(20)).toBe(6);
+  });
+
+  it('uses the Speaking composite conversion from the prompt', () => {
+    expect(speakingCompositeToPracticeBand(0.24)).toBe(1);
+    expect(speakingCompositeToPracticeBand(0.25)).toBe(1.5);
+    expect(speakingCompositeToPracticeBand(4.75)).toBe(6);
+  });
+
+  it('maps practice bands to CEFR levels', () => {
+    expect(practiceBandToCefr(1.5)).toBe('A1');
+    expect(practiceBandToCefr(2.5)).toBe('A2');
+    expect(practiceBandToCefr(4.5)).toBe('B2');
+    expect(practiceBandToCefr(6)).toBe('C2');
+  });
+});
+
+describe('constructedGradeBatchSchema', () => {
   it('validates mock AI output', () => {
-    const parsed = aiGradeResultSchema.parse({
-      skill: 'writing',
-      task_type: 'writing_email',
-      overall_score: 22,
-      score_scale: '0-30',
-      rubric_scores: { task_fulfillment: 4 },
-      comments: { overall: 'Good' },
-      strengths: [],
-      weaknesses: [],
-      improvement_suggestions: [],
-      confidence_flag: 'normal',
+    const parsed = constructedGradeBatchSchema.parse({
+      items: [{
+        item_id: 'item-1',
+        task_type: 'writing_email',
+        item_score: 4,
+        rubric_scores: [{ criterion: 'task_fulfillment', score: 4, comment: '完成主要要求' }],
+        overall_comment: '整體表現良好。',
+        strengths: [],
+        weaknesses: [],
+        improvement_suggestions: [],
+        confidence_flag: 'normal',
+        evidence_flags: [],
+      }],
     });
-    expect(parsed.overall_score).toBe(22);
+    expect(parsed.items[0].item_score).toBe(4);
   });
 });

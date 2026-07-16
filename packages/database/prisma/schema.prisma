@@ -85,10 +85,12 @@ enum AudioResponseStatus {
 }
 
 enum GradingJobType {
+  objective_feedback
   writing_grading
   speaking_transcription
   speaking_grading
   report_generation
+  feedback_translation
 }
 
 enum GradingJobStatus {
@@ -100,6 +102,8 @@ enum GradingJobStatus {
 }
 
 enum AiSkill {
+  reading
+  listening
   writing
   speaking
 }
@@ -410,16 +414,23 @@ model Response {
 }
 
 model AudioResponse {
-  id              String              @id @default(uuid())
-  attemptId       String              @map("attempt_id")
-  examItemId      String              @map("exam_item_id")
-  storageKey      String              @map("storage_key")
-  mimeType        String              @map("mime_type")
-  durationMs      Int?                @map("duration_ms")
-  transcriptText  String?             @map("transcript_text")
-  transcriptModel String?             @map("transcript_model")
-  status          AudioResponseStatus @default(uploaded)
-  createdAt       DateTime            @default(now()) @map("created_at")
+  id                   String              @id @default(uuid())
+  attemptId            String              @map("attempt_id")
+  examItemId           String              @map("exam_item_id")
+  storageKey           String              @map("storage_key")
+  mimeType             String              @map("mime_type")
+  durationMs           Int?                @map("duration_ms")
+  transcriptText       String?             @map("transcript_text")
+  displayTranscript    String?             @map("display_transcript")
+  transcriptModel      String?             @map("transcript_model")
+  transcriptConfidence Decimal?            @map("transcript_confidence") @db.Decimal(5, 4)
+  transcriptMetaJson   Json?               @map("transcript_meta_json")
+  audioQualityJson     Json?               @map("audio_quality_json")
+  acousticProvider     String?             @map("acoustic_provider")
+  acousticStatus       String?             @map("acoustic_status")
+  acousticJson         Json?               @map("acoustic_json")
+  status               AudioResponseStatus @default(uploaded)
+  createdAt            DateTime            @default(now()) @map("created_at")
 
   attempt  Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   examItem ExamItem @relation(fields: [examItemId], references: [id])
@@ -448,10 +459,13 @@ model GradingJob {
 model AiGradeResult {
   id             String         @id @default(uuid())
   attemptId      String         @map("attempt_id")
-  examItemId     String         @map("exam_item_id")
+  examItemId     String?        @map("exam_item_id")
   skill          AiSkill
+  resultKey      String         @map("result_key")
+  locale         String         @default("zh-TW")
   modelName      String         @map("model_name")
   promptVersion  String         @map("prompt_version")
+  inputHash      String?        @map("input_hash")
   overallScore   Decimal        @map("overall_score") @db.Decimal(5, 2)
   rubricJson     Json           @map("rubric_json")
   feedbackJson   Json           @map("feedback_json")
@@ -459,10 +473,12 @@ model AiGradeResult {
   costEstimate   Decimal?       @map("cost_estimate") @db.Decimal(10, 6)
   status         AiResultStatus @default(succeeded)
   createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
 
-  attempt  Attempt  @relation(fields: [attemptId], references: [id])
-  examItem ExamItem @relation(fields: [examItemId], references: [id])
+  attempt  Attempt   @relation(fields: [attemptId], references: [id])
+  examItem ExamItem? @relation(fields: [examItemId], references: [id])
 
+  @@unique([attemptId, resultKey, promptVersion, locale])
   @@index([attemptId])
   @@map("ai_grade_results")
 }

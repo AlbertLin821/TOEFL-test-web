@@ -32,10 +32,12 @@ export const ATTEMPT_STATUSES = [
 export type AttemptStatus = (typeof ATTEMPT_STATUSES)[number];
 
 export const JOB_TYPES = [
+  'objective_feedback',
   'writing_grading',
   'speaking_transcription',
   'speaking_grading',
   'report_generation',
+  'feedback_translation',
   'email_send',
   'pdf_generation',
 ] as const;
@@ -46,6 +48,8 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 
 export const SCORE_SCALE_MAX = 30;
 export const TOTAL_SCALE_MAX = 120;
+export const PRACTICE_BAND_MAX = 6;
+export const SCORE_CONVERSION_VERSION = 'practice-v2.0';
 
 export const ERROR_CODES = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',

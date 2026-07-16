@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import argon2 from 'argon2';
 import { prisma } from '@toefl/database';
-import { createUserSchema, importUsersSchema } from '@toefl/shared';
+import { createUserSchema, importUsersSchema, updateUserSchema } from '@toefl/shared';
 import { errors } from '../lib/errors.js';
 import { requireAuth, requireRole, assertOrgScope, type AuthedRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
@@ -47,9 +47,17 @@ usersRouter.post(
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;
-      const body = req.body as { name: string; email: string; role: string; password: string };
+      const body = req.body as { name: string; email: string; role: string; password: string; organization_id?: string | null };
       if (user.role === 'org_admin' && (body.role === 'platform_admin' || body.role === 'org_admin')) {
         throw errors.forbidden('Org admins can only create teachers and students.');
+      }
+      const organizationId = user.role === 'platform_admin' ? body.organization_id ?? null : user.organizationId;
+      if (body.role !== 'platform_admin' && !organizationId) {
+        throw errors.validation({ organization_id: 'An organization is required.' });
+      }
+      if (organizationId) {
+        const organization = await prisma.organization.findUnique({ where: { id: organizationId } });
+        if (!organization) throw errors.notFound('Organization');
       }
       const existing = await prisma.user.findUnique({ where: { email: body.email } });
       if (existing) throw errors.conflict('Email already exists.');
@@ -57,14 +65,14 @@ usersRouter.post(
         data: {
           name: body.name,
           email: body.email,
-          role: body.role as 'teacher' | 'student',
+          role: body.role as 'platform_admin' | 'org_admin' | 'teacher' | 'student',
           passwordHash: await argon2.hash(body.password),
-          organizationId: user.organizationId,
+          organizationId,
         },
         select: { id: true, name: true, email: true, role: true, status: true },
       });
       await auditLog({
-        organizationId: user.organizationId,
+        organizationId,
         actorUserId: user.id,
         action: 'user_created',
         resourceType: 'user',
@@ -77,6 +85,94 @@ usersRouter.post(
     }
   },
 );
+
+usersRouter.patch(
+  '/users/:id',
+  requireRole('platform_admin', 'org_admin'),
+  validateBody(updateUserSchema),
+  async (req, res, next) => {
+    try {
+      const actor = (req as AuthedRequest).user;
+      const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+      if (!target) throw errors.notFound('User');
+      assertOrgScope(actor, target.organizationId);
+      const body = req.body as {
+        name?: string;
+        email?: string;
+        role?: 'platform_admin' | 'org_admin' | 'teacher' | 'student';
+        status?: 'active' | 'inactive';
+        password?: string;
+      };
+      if (actor.role === 'org_admin' && body.role && !['teacher', 'student'].includes(body.role)) {
+        throw errors.forbidden('Org admins can only manage teachers and students.');
+      }
+      if (actor.role === 'org_admin' && ['platform_admin', 'org_admin'].includes(target.role)) {
+        throw errors.forbidden('Org admins cannot edit administrator accounts.');
+      }
+      if (actor.id === target.id && body.status === 'inactive') {
+        throw errors.conflict('You cannot deactivate your own account.');
+      }
+      if (body.email && body.email !== target.email) {
+        const duplicate = await prisma.user.findUnique({ where: { email: body.email } });
+        if (duplicate) throw errors.conflict('Email already exists.');
+      }
+      const updated = await prisma.user.update({
+        where: { id: target.id },
+        data: {
+          name: body.name,
+          email: body.email,
+          role: body.role,
+          status: body.status,
+          passwordHash: body.password ? await argon2.hash(body.password) : undefined,
+        },
+        select: { id: true, name: true, email: true, role: true, status: true, organizationId: true },
+      });
+      await auditLog({
+        organizationId: target.organizationId,
+        actorUserId: actor.id,
+        action: 'user_updated',
+        resourceType: 'user',
+        resourceId: target.id,
+        metadata: { role: updated.role, status: updated.status },
+      });
+      res.json({ ...updated, organization_id: updated.organizationId });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+usersRouter.delete('/users/:id', requireRole('platform_admin', 'org_admin'), async (req, res, next) => {
+  try {
+    const actor = (req as AuthedRequest).user;
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: {
+        _count: { select: { attempts: true, taughtClasses: true, assignmentsMade: true, teacherComments: true, scoreReports: true } },
+      },
+    });
+    if (!target) throw errors.notFound('User');
+    assertOrgScope(actor, target.organizationId);
+    if (actor.id === target.id) throw errors.conflict('You cannot delete your own account.');
+    if (actor.role === 'org_admin' && ['platform_admin', 'org_admin'].includes(target.role)) {
+      throw errors.forbidden('Org admins cannot delete administrator accounts.');
+    }
+    const dependencies = Object.values(target._count).reduce((sum, count) => sum + count, 0);
+    if (dependencies > 0) throw errors.conflict('This account has classes, assignments, attempts, comments, or reports. Deactivate it instead.');
+    await prisma.user.delete({ where: { id: target.id } });
+    await auditLog({
+      organizationId: target.organizationId,
+      actorUserId: actor.id,
+      action: 'user_deleted',
+      resourceType: 'user',
+      resourceId: target.id,
+      metadata: { email: target.email },
+    });
+    res.json({ deleted: true });
+  } catch (e) {
+    next(e);
+  }
+});
 
 usersRouter.post(
   '/users/import',

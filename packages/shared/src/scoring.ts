@@ -71,3 +71,66 @@ export function toScaledScore(rawEarned: number, rawMax: number): number {
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+/**
+ * Practice-only 0-30 to 1-6 conversion used for Reading and Listening.
+ * The AI never performs this conversion; it is kept deterministic and versioned.
+ */
+export function scaledScoreToPracticeBand(score: number): number {
+  const normalized = Math.min(30, Math.max(0, score));
+  if (normalized >= 30) return 6;
+  if (normalized >= 27) return 5.5;
+  if (normalized >= 24) return 5;
+  if (normalized >= 21) return 4.5;
+  if (normalized >= 18) return 4;
+  if (normalized >= 15) return 3.5;
+  if (normalized >= 12) return 3;
+  if (normalized >= 9) return 2.5;
+  if (normalized >= 6) return 2;
+  if (normalized >= 3) return 1.5;
+  return 1;
+}
+
+/** Cosmos practice conversion from the Writing prompt (raw maximum 20). */
+export function writingRawToPracticeBand(rawScore: number, rawMax = 20): number {
+  if (rawMax <= 0) return 1;
+  const normalized = Math.min(20, Math.max(0, (rawScore / rawMax) * 20));
+  if (normalized >= 20) return 6;
+  if (normalized >= 18) return 5.5;
+  if (normalized >= 16) return 5;
+  if (normalized >= 14) return 4.5;
+  if (normalized >= 12) return 4;
+  if (normalized >= 10) return 3.5;
+  if (normalized >= 8) return 3;
+  if (normalized >= 6) return 2.5;
+  if (normalized >= 4) return 2;
+  if (normalized >= 2) return 1.5;
+  return 1;
+}
+
+/** Speaking prompt conversion based on the 0-5 composite average. */
+export function speakingCompositeToPracticeBand(composite: number): number {
+  const normalized = Math.min(5, Math.max(0, composite));
+  if (normalized >= 4.75) return 6;
+  if (normalized >= 4.25) return 5.5;
+  if (normalized >= 3.75) return 5;
+  if (normalized >= 3.25) return 4.5;
+  if (normalized >= 2.75) return 4;
+  if (normalized >= 2.25) return 3.5;
+  if (normalized >= 1.75) return 3;
+  if (normalized >= 1.25) return 2.5;
+  if (normalized >= 0.75) return 2;
+  if (normalized >= 0.25) return 1.5;
+  return 1;
+}
+
+export type CefrLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+
+export function practiceBandToCefr(band: number): CefrLevel {
+  if (band >= 6) return 'C2';
+  if (band >= 5) return 'C1';
+  if (band >= 4) return 'B2';
+  if (band >= 3) return 'B1';
+  if (band >= 2) return 'A2';
+  return 'A1';
+}

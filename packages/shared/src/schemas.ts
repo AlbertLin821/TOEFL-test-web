@@ -23,7 +23,18 @@ export const createUserSchema = z.object({
   email: z.string().email(),
   role: z.enum(ROLES),
   password: z.string().min(8).max(100),
+  organization_id: z.string().uuid().nullable().optional(),
 });
+
+export const updateUserSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    email: z.string().email().optional(),
+    role: z.enum(ROLES).optional(),
+    status: z.enum(['active', 'inactive']).optional(),
+    password: z.string().min(8).max(100).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required.' });
 
 export const importUsersSchema = z.object({
   class_id: z.string().uuid().optional(),
@@ -42,7 +53,16 @@ export const importUsersSchema = z.object({
 export const createClassSchema = z.object({
   name: z.string().min(1).max(100),
   teacher_id: z.string().uuid().optional(),
+  organization_id: z.string().uuid().optional(),
 });
+
+export const updateClassSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    teacher_id: z.string().uuid().nullable().optional(),
+    status: z.enum(['active', 'archived']).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required.' });
 
 export const addClassMembersSchema = z.object({
   user_ids: z.array(z.string().uuid()).min(1),
@@ -51,7 +71,23 @@ export const addClassMembersSchema = z.object({
 export const createExamPaperSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
+  organization_id: z.string().uuid().nullable().optional(),
 });
+
+export const updateExamPaperSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).nullable().optional(),
+    status: z.enum(['draft', 'published', 'archived']).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required.' });
+
+export const updateExamVersionSchema = z
+  .object({
+    status: z.enum(['draft', 'published', 'archived']).optional(),
+    total_score: z.number().int().positive().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required.' });
 
 export const createExamVersionSchema = z.object({
   version_no: z.string().min(1).max(20),
@@ -72,6 +108,7 @@ export const createAssignmentSchema = z
   .object({
     exam_version_id: z.string().uuid(),
     class_id: z.string().uuid(),
+    organization_id: z.string().uuid().optional(),
     opens_at: z.coerce.date(),
     closes_at: z.coerce.date(),
     max_attempts: z.number().int().min(1).max(10).default(1),
@@ -80,6 +117,15 @@ export const createAssignmentSchema = z
     message: 'closes_at must be after opens_at',
     path: ['closes_at'],
   });
+
+export const updateAssignmentSchema = z
+  .object({
+    opens_at: z.coerce.date().optional(),
+    closes_at: z.coerce.date().optional(),
+    max_attempts: z.number().int().min(1).max(10).optional(),
+    status: z.enum(['scheduled', 'active', 'closed']).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required.' });
 
 export const startAttemptSchema = z.object({
   assignment_id: z.string().uuid(),

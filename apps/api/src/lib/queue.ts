@@ -1,9 +1,10 @@
-import { Queue } from 'bullmq';
+import { Queue, type ConnectionOptions } from 'bullmq';
 import { Redis } from 'ioredis';
 import { QUEUE_NAMES } from '@toefl/shared';
 import { config } from '../config.js';
 
 const connection = new Redis(config.redisUrl, { maxRetriesPerRequest: null });
+const queueConnection = connection as unknown as ConnectionOptions;
 
 const defaultJobOptions = {
   attempts: Number(process.env.AI_MAX_RETRIES ?? 3) + 1,
@@ -12,5 +13,5 @@ const defaultJobOptions = {
   removeOnFail: 500,
 };
 
-export const gradingQueue = new Queue(QUEUE_NAMES.grading, { connection, defaultJobOptions });
-export const emailQueue = new Queue(QUEUE_NAMES.email, { connection, defaultJobOptions });
+export const gradingQueue = new Queue(QUEUE_NAMES.grading, { connection: queueConnection, defaultJobOptions });
+export const emailQueue = new Queue(QUEUE_NAMES.email, { connection: queueConnection, defaultJobOptions });

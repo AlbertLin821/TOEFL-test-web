@@ -561,7 +561,7 @@ async function main() {
       orderNo: 1,
       gradingType: 'ai',
       timeLimitSeconds: 7 * 60,
-      scoreMax: new Prisma.Decimal(30),
+      scoreMax: new Prisma.Decimal(5),
       contentJson: {
         instructions: WRITE_AN_EMAIL.instructions,
         scenario: WRITE_AN_EMAIL.scenario,
@@ -602,7 +602,7 @@ async function main() {
       orderNo: 1,
       gradingType: 'ai',
       timeLimitSeconds: 10 * 60,
-      scoreMax: new Prisma.Decimal(30),
+      scoreMax: new Prisma.Decimal(5),
       contentJson: {
         instructions: ACADEMIC_DISCUSSION.instructions,
         context: ACADEMIC_DISCUSSION.context,
@@ -659,7 +659,7 @@ async function main() {
         orderNo: i + 1,
         gradingType: 'ai',
         timeLimitSeconds: q.responseSeconds,
-        scoreMax: new Prisma.Decimal(30),
+        scoreMax: new Prisma.Decimal(5),
         contentJson: {
           question_number: i + 1,
           response_seconds: q.responseSeconds,
@@ -717,7 +717,7 @@ async function main() {
         orderNo: i + 1,
         gradingType: 'ai',
         timeLimitSeconds: q.responseSeconds,
-        scoreMax: new Prisma.Decimal(30),
+        scoreMax: new Prisma.Decimal(5),
         contentJson: {
           question_number: i + 1,
           question_text: q.questionText,

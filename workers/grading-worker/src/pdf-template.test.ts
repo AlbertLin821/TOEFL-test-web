@@ -14,6 +14,15 @@ describe('buildReportHtml', () => {
       examVersion: 'v1.0',
       completedAt: '2026-07-07T12:00:00.000Z',
       scores: { reading: 24, listening: 23, writing: 22, speaking: 21, total: 90 },
+      scoreProfile: {
+        conversion_version: 'practice-v2.0',
+        skills: {
+          reading: { score_30: 24, band_6: 5, cefr: 'C1' },
+          listening: { score_30: 23, band_6: 4.5, cefr: 'B2' },
+          writing: { score_30: 22, band_6: 4.5, cefr: 'B2' },
+          speaking: { score_30: 21, band_6: 4.5, cefr: 'B2' },
+        },
+      },
       objectiveStats: [
         { sectionType: 'reading', correctCount: 18, totalQuestions: 20, scaledScore: 24 },
       ],
@@ -21,7 +30,7 @@ describe('buildReportHtml', () => {
         {
           skill: 'writing',
           taskLabel: 'Write an Email',
-          overallScore: 22,
+          overallScore: 4,
           overallComment: 'Good structure.',
         },
       ],

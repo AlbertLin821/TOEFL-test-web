@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { prisma } from '@toefl/database';
-import { createExamPaperSchema, createExamVersionSchema } from '@toefl/shared';
+import {
+  createExamPaperSchema,
+  createExamVersionSchema,
+  updateExamPaperSchema,
+  updateExamVersionSchema,
+} from '@toefl/shared';
 import { errors } from '../lib/errors.js';
 import { requireAuth, requireRole, assertOrgScope, type AuthedRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
@@ -14,10 +19,11 @@ examsRouter.use(['/exam-papers', '/exam-versions'], requireAuth);
 /** Papers visible to an org: platform-shared papers (organizationId null) + own papers. */
 examsRouter.get('/exam-papers', requireRole('platform_admin', 'org_admin', 'teacher'), async (req, res, next) => {
   try {
-    const user = (req as AuthedRequest).user;
+    const user = (req as unknown as AuthedRequest).user;
+    const requestedOrgId = req.query.organization_id as string | undefined;
     const where =
       user.role === 'platform_admin'
-        ? {}
+        ? requestedOrgId ? { OR: [{ organizationId: null }, { organizationId: requestedOrgId }] } : {}
         : { OR: [{ organizationId: null }, { organizationId: user.organizationId! }] };
     const papers = await prisma.examPaper.findMany({
       where,
@@ -52,17 +58,18 @@ examsRouter.post(
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;
-      const body = req.body as { title: string; description?: string };
+      const body = req.body as { title: string; description?: string; organization_id?: string | null };
+      const organizationId = user.role === 'platform_admin' ? body.organization_id ?? null : user.organizationId;
       const created = await prisma.examPaper.create({
         data: {
           title: body.title,
           description: body.description,
-          organizationId: user.role === 'platform_admin' ? null : user.organizationId,
+          organizationId,
           createdBy: user.id,
         },
       });
       await auditLog({
-        organizationId: user.organizationId,
+        organizationId,
         actorUserId: user.id,
         action: 'exam_paper_created',
         resourceType: 'exam_paper',
@@ -74,6 +81,63 @@ examsRouter.post(
     }
   },
 );
+
+examsRouter.patch(
+  '/exam-papers/:id',
+  requireRole('platform_admin', 'org_admin'),
+  validateBody(updateExamPaperSchema),
+  async (req, res, next) => {
+    try {
+      const user = (req as AuthedRequest).user;
+      const paper = await prisma.examPaper.findUnique({ where: { id: req.params.id } });
+      if (!paper) throw errors.notFound('Exam paper');
+      if (paper.organizationId) assertOrgScope(user, paper.organizationId);
+      else if (user.role !== 'platform_admin') throw errors.forbidden('Shared exam papers can only be edited by platform admins.');
+      const body = req.body as { title?: string; description?: string | null; status?: 'draft' | 'published' | 'archived' };
+      const updated = await prisma.examPaper.update({
+        where: { id: paper.id },
+        data: { title: body.title, description: body.description, status: body.status },
+      });
+      await auditLog({
+        organizationId: paper.organizationId,
+        actorUserId: user.id,
+        action: 'exam_paper_updated',
+        resourceType: 'exam_paper',
+        resourceId: paper.id,
+        metadata: { status: updated.status },
+      });
+      res.json({ id: updated.id, title: updated.title, description: updated.description, status: updated.status });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+examsRouter.delete('/exam-papers/:id', requireRole('platform_admin', 'org_admin'), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const paper = await prisma.examPaper.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { versions: true } } },
+    });
+    if (!paper) throw errors.notFound('Exam paper');
+    if (paper.organizationId) assertOrgScope(user, paper.organizationId);
+    else if (user.role !== 'platform_admin') throw errors.forbidden();
+    if (paper._count.versions > 0) throw errors.conflict('This exam paper has versions. Archive it instead.');
+    await prisma.examPaper.delete({ where: { id: paper.id } });
+    await auditLog({
+      organizationId: paper.organizationId,
+      actorUserId: user.id,
+      action: 'exam_paper_deleted',
+      resourceType: 'exam_paper',
+      resourceId: paper.id,
+      metadata: { title: paper.title },
+    });
+    res.json({ deleted: true });
+  } catch (e) {
+    next(e);
+  }
+});
 
 examsRouter.post(
   '/exam-papers/:id/versions',
@@ -128,10 +192,72 @@ examsRouter.post(
   },
 );
 
+examsRouter.patch(
+  '/exam-versions/:id',
+  requireRole('platform_admin', 'org_admin'),
+  validateBody(updateExamVersionSchema),
+  async (req, res, next) => {
+    try {
+      const user = (req as AuthedRequest).user;
+      const version = await prisma.examVersion.findUnique({ where: { id: req.params.id }, include: { examPaper: true } });
+      if (!version) throw errors.notFound('Exam version');
+      if (version.examPaper.organizationId) assertOrgScope(user, version.examPaper.organizationId);
+      else if (user.role !== 'platform_admin') throw errors.forbidden();
+      const body = req.body as { status?: 'draft' | 'published' | 'archived'; total_score?: number };
+      const updated = await prisma.examVersion.update({
+        where: { id: version.id },
+        data: {
+          status: body.status,
+          totalScore: body.total_score,
+          publishedAt: body.status === 'published' ? new Date() : body.status ? null : undefined,
+        },
+      });
+      await auditLog({
+        organizationId: version.examPaper.organizationId,
+        actorUserId: user.id,
+        action: 'exam_version_updated',
+        resourceType: 'exam_version',
+        resourceId: version.id,
+        metadata: { status: updated.status },
+      });
+      res.json({ id: updated.id, version_no: updated.versionNo, status: updated.status, total_score: updated.totalScore });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+examsRouter.delete('/exam-versions/:id', requireRole('platform_admin', 'org_admin'), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const version = await prisma.examVersion.findUnique({
+      where: { id: req.params.id },
+      include: { examPaper: true, _count: { select: { sections: true, assignments: true, attempts: true, reports: true } } },
+    });
+    if (!version) throw errors.notFound('Exam version');
+    if (version.examPaper.organizationId) assertOrgScope(user, version.examPaper.organizationId);
+    else if (user.role !== 'platform_admin') throw errors.forbidden();
+    const dependencies = Object.values(version._count).reduce((sum, count) => sum + count, 0);
+    if (dependencies > 0) throw errors.conflict('This exam version contains content or usage history. Archive it instead.');
+    await prisma.examVersion.delete({ where: { id: version.id } });
+    await auditLog({
+      organizationId: version.examPaper.organizationId,
+      actorUserId: user.id,
+      action: 'exam_version_deleted',
+      resourceType: 'exam_version',
+      resourceId: version.id,
+      metadata: { version_no: version.versionNo },
+    });
+    res.json({ deleted: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /** Full exam version structure. Answer keys are NEVER included. */
 examsRouter.get('/exam-versions/:id', async (req, res, next) => {
   try {
-    const user = (req as AuthedRequest).user;
+    const user = (req as unknown as AuthedRequest).user;
     const version = await prisma.examVersion.findUnique({
       where: { id: req.params.id },
       include: {

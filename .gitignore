@@ -3,6 +3,8 @@ dist/
 build/
 coverage/
 *.log
+*.tsbuildinfo
+.impeccable/
 .env
 .env.*
 !.env.example

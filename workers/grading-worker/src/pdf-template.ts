@@ -9,10 +9,20 @@ export interface ReportPdfScores {
 }
 
 export interface AiFeedbackSummary {
-  skill: 'writing' | 'speaking';
+  skill: 'reading' | 'listening' | 'writing' | 'speaking';
   taskLabel: string;
   overallScore: number;
   overallComment?: string;
+}
+
+export interface ReportScoreProfile {
+  conversion_version: string;
+  skills: Record<string, {
+    score_30: number;
+    band_6: number;
+    cefr: string;
+    [key: string]: unknown;
+  } | null>;
 }
 
 export interface ReportPdfInput {
@@ -26,6 +36,7 @@ export interface ReportPdfInput {
   examVersion: string;
   completedAt: string;
   scores: ReportPdfScores;
+  scoreProfile: ReportScoreProfile;
   objectiveStats: { sectionType: string; correctCount: number; totalQuestions: number; scaledScore: number }[];
   aiFeedback: AiFeedbackSummary[];
   reportVersion: number;
@@ -39,8 +50,10 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function scoreCell(score: number | null): string {
-  return score !== null ? `${score} / 30` : 'Pending';
+function scoreCell(skill: string, score: number | null, profile: ReportScoreProfile): string {
+  if (score === null) return 'Pending';
+  const detail = profile.skills[skill];
+  return detail ? `${score} / 30 · Band ${detail.band_6} / 6 · CEFR ${escapeHtml(detail.cefr)}` : `${score} / 30`;
 }
 
 export function buildReportHtml(input: ReportPdfInput): string {
@@ -55,7 +68,8 @@ export function buildReportHtml(input: ReportPdfInput): string {
   const aiRows = input.aiFeedback
     .map((item) => {
       const comment = item.overallComment ? `<p class="muted">${escapeHtml(item.overallComment)}</p>` : '';
-      return `<div class="ai-item"><strong>${escapeHtml(item.taskLabel)}</strong> — ${item.overallScore} / 30${comment}</div>`;
+      const scale = item.skill === 'reading' || item.skill === 'listening' ? '30' : '5';
+      return `<div class="ai-item"><strong>${escapeHtml(item.taskLabel)}</strong> — ${item.overallScore} / ${scale}${comment}</div>`;
     })
     .join('');
 
@@ -100,10 +114,10 @@ export function buildReportHtml(input: ReportPdfInput): string {
 
   <h2>Score Overview</h2>
   <table class="scores">
-    <tr><td>Reading</td><td>${scoreCell(input.scores.reading)}</td></tr>
-    <tr><td>Listening</td><td>${scoreCell(input.scores.listening)}</td></tr>
-    <tr><td>Writing</td><td>${scoreCell(input.scores.writing)}</td></tr>
-    <tr><td>Speaking</td><td>${scoreCell(input.scores.speaking)}</td></tr>
+    <tr><td>Reading</td><td>${scoreCell('reading', input.scores.reading, input.scoreProfile)}</td></tr>
+    <tr><td>Listening</td><td>${scoreCell('listening', input.scores.listening, input.scoreProfile)}</td></tr>
+    <tr><td>Writing</td><td>${scoreCell('writing', input.scores.writing, input.scoreProfile)}</td></tr>
+    <tr><td>Speaking</td><td>${scoreCell('speaking', input.scores.speaking, input.scoreProfile)}</td></tr>
     <tr class="total"><td>Total</td><td>${input.scores.total !== null ? `${input.scores.total} / 120` : 'Pending'}</td></tr>
   </table>
 

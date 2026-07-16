@@ -64,7 +64,21 @@ const createOrgSchema = z.object({
     .max(50)
     .regex(/^[a-z0-9-]+$/),
   plan_type: z.string().max(50).optional(),
+  student_quota: z.number().int().min(0).optional(),
+  exam_quota: z.number().int().min(0).optional(),
+  ai_credit_quota: z.number().int().min(0).optional(),
 });
+
+const updateOrgSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    plan_type: z.string().max(50).nullable().optional(),
+    status: z.enum(['active', 'suspended']).optional(),
+    student_quota: z.number().int().min(0).optional(),
+    exam_quota: z.number().int().min(0).optional(),
+    ai_credit_quota: z.number().int().min(0).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required.' });
 
 organizationsRouter.post(
   '/organizations',
@@ -73,11 +87,18 @@ organizationsRouter.post(
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;
-      const body = req.body as { name: string; slug: string; plan_type?: string };
+      const body = req.body as { name: string; slug: string; plan_type?: string; student_quota?: number; exam_quota?: number; ai_credit_quota?: number };
       const existing = await prisma.organization.findUnique({ where: { slug: body.slug } });
       if (existing) throw errors.conflict('Slug already exists.');
       const created = await prisma.organization.create({
-        data: { name: body.name, slug: body.slug, planType: body.plan_type },
+        data: {
+          name: body.name,
+          slug: body.slug,
+          planType: body.plan_type,
+          studentQuota: body.student_quota ?? 0,
+          examQuota: body.exam_quota ?? 0,
+          aiCreditQuota: body.ai_credit_quota ?? 0,
+        },
       });
       await auditLog({
         organizationId: created.id,
@@ -92,3 +113,81 @@ organizationsRouter.post(
     }
   },
 );
+
+organizationsRouter.patch(
+  '/organizations/:id',
+  requireRole('platform_admin'),
+  validateBody(updateOrgSchema),
+  async (req, res, next) => {
+    try {
+      const user = (req as AuthedRequest).user;
+      const existing = await prisma.organization.findUnique({ where: { id: req.params.id } });
+      if (!existing) throw errors.notFound('Organization');
+      const body = req.body as {
+        name?: string;
+        plan_type?: string | null;
+        status?: 'active' | 'suspended';
+        student_quota?: number;
+        exam_quota?: number;
+        ai_credit_quota?: number;
+      };
+      const updated = await prisma.organization.update({
+        where: { id: existing.id },
+        data: {
+          name: body.name,
+          planType: body.plan_type,
+          status: body.status,
+          studentQuota: body.student_quota,
+          examQuota: body.exam_quota,
+          aiCreditQuota: body.ai_credit_quota,
+        },
+      });
+      await auditLog({
+        organizationId: updated.id,
+        actorUserId: user.id,
+        action: 'organization_updated',
+        resourceType: 'organization',
+        resourceId: updated.id,
+        metadata: { status: updated.status },
+      });
+      res.json({
+        id: updated.id,
+        name: updated.name,
+        slug: updated.slug,
+        status: updated.status,
+        plan_type: updated.planType,
+        student_quota: updated.studentQuota,
+        exam_quota: updated.examQuota,
+        ai_credit_quota: updated.aiCreditQuota,
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+organizationsRouter.delete('/organizations/:id', requireRole('platform_admin'), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const org = await prisma.organization.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { users: true, classes: true, examPapers: true, assignments: true, attempts: true } } },
+    });
+    if (!org) throw errors.notFound('Organization');
+    const dependencies = Object.values(org._count).reduce((sum, count) => sum + count, 0);
+    if (dependencies > 0) {
+      throw errors.conflict('Organization contains accounts, classes, exams, assignments, or results. Suspend it instead.');
+    }
+    await prisma.organization.delete({ where: { id: org.id } });
+    await auditLog({
+      actorUserId: user.id,
+      action: 'organization_deleted',
+      resourceType: 'organization',
+      resourceId: org.id,
+      metadata: { name: org.name },
+    });
+    res.json({ deleted: true });
+  } catch (e) {
+    next(e);
+  }
+});

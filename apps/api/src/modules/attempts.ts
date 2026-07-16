@@ -152,7 +152,7 @@ async function loadOwnedAttempt(req: AuthedRequest, attemptId: string) {
 // ---------- Get attempt state ----------
 attemptsRouter.get('/attempts/:id', async (req, res, next) => {
   try {
-    const attempt = await loadOwnedAttempt(req as AuthedRequest, req.params.id);
+    const attempt = await loadOwnedAttempt(req as unknown as AuthedRequest, req.params.id);
     const [sectionStates, responses, audioResponses] = await Promise.all([
       prisma.attemptSectionState.findMany({ where: { attemptId: attempt.id } }),
       prisma.response.findMany({
@@ -343,43 +343,10 @@ attemptsRouter.post('/attempts/:id/submit', requireRole('student'), async (req, 
     // 1) Objective scoring (reading / listening / build-a-sentence)
     const objectiveStats = await scoreObjectiveItems(attempt.id);
 
-    // 2) Create grading jobs for AI items
-    const aiItems = await prisma.examItem.findMany({
-      where: {
-        gradingType: 'ai',
-        module: { section: { examVersionId: attempt.examVersionId } },
-      },
-      include: { module: { include: { section: true } } },
-    });
-
-    const jobIds: string[] = [];
-    const writingItems = aiItems.filter((i) => i.module.section.sectionType === 'writing');
-    const speakingItems = aiItems.filter((i) => i.module.section.sectionType === 'speaking');
-
-    if (writingItems.length > 0) {
-      const job = await prisma.gradingJob.create({
-        data: {
-          attemptId: attempt.id,
-          jobType: 'writing_grading',
-          payloadJson: { item_ids: writingItems.map((i) => i.id) },
-        },
-      });
-      jobIds.push(job.id);
-      await gradingQueue.add('writing_grading', { gradingJobId: job.id, attemptId: attempt.id });
-    }
-    if (speakingItems.length > 0) {
-      const job = await prisma.gradingJob.create({
-        data: {
-          attemptId: attempt.id,
-          jobType: 'speaking_transcription',
-          payloadJson: { item_ids: speakingItems.map((i) => i.id) },
-        },
-      });
-      jobIds.push(job.id);
-      await gradingQueue.add('speaking_transcription', { gradingJobId: job.id, attemptId: attempt.id });
-    }
-
-    // 3) Store objective stats snapshot on a draft report
+    // 2) Persist the immutable objective result snapshot before any AI job starts.
+    // AI may explain these results but never changes correctness or scores.
+    const objectiveStatsSummary = objectiveStats.map(({ itemResults: _itemResults, ...stats }) => stats);
+    const objectiveItemResults = objectiveStats.flatMap((stats) => stats.itemResults);
     const report = await prisma.scoreReport.upsert({
       where: { attemptId: attempt.id },
       update: {},
@@ -397,18 +364,91 @@ attemptsRouter.post('/attempts/:id/submit', requireRole('student'), async (req, 
       data: {
         readingScore: reading ? new Prisma.Decimal(reading.scaledScore) : undefined,
         listeningScore: listening ? new Prisma.Decimal(listening.scaledScore) : undefined,
-        reportJson: { objective_stats: JSON.parse(JSON.stringify(objectiveStats)) },
+        reportJson: {
+          objective_stats: JSON.parse(JSON.stringify(objectiveStatsSummary)),
+          objective_item_results: JSON.parse(JSON.stringify(objectiveItemResults)),
+          feedback_locales: {
+            'zh-TW': { status: 'processing' },
+            en: { status: 'not_requested' },
+          },
+        },
       },
     });
 
+    // 3) Create one AI feedback job per objective section plus one batched job
+    // for Writing and one transcription pipeline for Speaking.
+    const aiItems = await prisma.examItem.findMany({
+      where: {
+        gradingType: 'ai',
+        module: { section: { examVersionId: attempt.examVersionId } },
+      },
+      include: { module: { include: { section: true } } },
+    });
+
+    const jobIds: string[] = [];
+    const writingItems = aiItems.filter((i) => i.module.section.sectionType === 'writing');
+    const speakingItems = aiItems.filter((i) => i.module.section.sectionType === 'speaking');
+
+    for (const sectionType of ['reading', 'listening'] as const) {
+      if (!objectiveStats.some((stats) => stats.sectionType === sectionType)) continue;
+      const job = await prisma.gradingJob.create({
+        data: {
+          attemptId: attempt.id,
+          jobType: 'objective_feedback',
+          payloadJson: { section_type: sectionType },
+        },
+      });
+      jobIds.push(job.id);
+      await gradingQueue.add(
+        'objective_feedback',
+        { gradingJobId: job.id, attemptId: attempt.id },
+        { jobId: job.id },
+      );
+    }
+
+    if (writingItems.length > 0) {
+      const job = await prisma.gradingJob.create({
+        data: {
+          attemptId: attempt.id,
+          jobType: 'writing_grading',
+          payloadJson: { item_ids: writingItems.map((i) => i.id) },
+        },
+      });
+      jobIds.push(job.id);
+      await gradingQueue.add(
+        'writing_grading',
+        { gradingJobId: job.id, attemptId: attempt.id },
+        { jobId: job.id },
+      );
+    }
+    if (speakingItems.length > 0) {
+      const job = await prisma.gradingJob.create({
+        data: {
+          attemptId: attempt.id,
+          jobType: 'speaking_transcription',
+          payloadJson: { item_ids: speakingItems.map((i) => i.id) },
+        },
+      });
+      jobIds.push(job.id);
+      await gradingQueue.add(
+        'speaking_transcription',
+        { gradingJobId: job.id, attemptId: attempt.id },
+        { jobId: job.id },
+      );
+    }
+
     await prisma.attempt.update({ where: { id: attempt.id }, data: { status: 'grading' } });
 
-    // If there are no AI items at all, finalize report immediately via report job
+    // If there are no feedback/grading jobs at all, finalize immediately.
     if (jobIds.length === 0) {
       const job = await prisma.gradingJob.create({
         data: { attemptId: attempt.id, jobType: 'report_generation' },
       });
-      await gradingQueue.add('report_generation', { gradingJobId: job.id, attemptId: attempt.id });
+      await gradingQueue.add(
+        'report_generation',
+        { gradingJobId: job.id, attemptId: attempt.id },
+        { jobId: job.id },
+      );
       jobIds.push(job.id);
     }
 

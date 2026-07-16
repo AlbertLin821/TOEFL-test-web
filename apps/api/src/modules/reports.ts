@@ -1,12 +1,18 @@
 import { Router } from 'express';
 import { prisma } from '@toefl/database';
-import { emailReportSchema, teacherCommentSchema } from '@toefl/shared';
+import {
+  SCORE_CONVERSION_VERSION,
+  emailReportSchema,
+  practiceBandToCefr,
+  scaledScoreToPracticeBand,
+  teacherCommentSchema,
+} from '@toefl/shared';
 import { errors } from '../lib/errors.js';
 import { requireAuth, requireRole, assertOrgScope, type AuthedRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { auditLog } from '../lib/audit.js';
 import { buckets, signedGetUrl } from '../lib/storage.js';
-import { emailQueue } from '../lib/queue.js';
+import { emailQueue, gradingQueue } from '../lib/queue.js';
 
 export const reportsRouter = Router();
 
@@ -31,13 +37,55 @@ async function loadReport(req: AuthedRequest, attemptId: string) {
   return attempt;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 reportsRouter.get('/reports/:attemptId', async (req, res, next) => {
   try {
-    const attempt = await loadReport(req as AuthedRequest, req.params.attemptId);
+    const attempt = await loadReport(req as unknown as AuthedRequest, req.params.attemptId);
     const report = attempt.scoreReports[0];
     if (!report) throw errors.business('REPORT_NOT_READY', 'Report is not ready yet.');
 
     const reportJson = (report.reportJson ?? {}) as Record<string, unknown>;
+    const serializeSkill = (skill: 'reading' | 'listening' | 'writing' | 'speaking') =>
+      attempt.aiGradeResults
+        .filter((result) => result.skill === skill && result.locale === 'zh-TW')
+        .map((result) => ({
+          result_key: result.resultKey,
+          exam_item_id: result.examItemId,
+          overall_score: Number(result.overallScore),
+          rubric: result.rubricJson,
+          feedback: result.feedbackJson,
+          status: result.status,
+          model_name: result.modelName,
+        }));
+    const feedbackLocales = asRecord(reportJson.feedback_locales);
+    const feedbackTranslations = asRecord(reportJson.feedback_translations);
+    const englishTranslation = asRecord(feedbackTranslations.en);
+    const scores = {
+      reading: report.readingScore !== null ? Number(report.readingScore) : null,
+      listening: report.listeningScore !== null ? Number(report.listeningScore) : null,
+      writing: report.writingScore !== null ? Number(report.writingScore) : null,
+      speaking: report.speakingScore !== null ? Number(report.speakingScore) : null,
+      total: report.totalScore !== null ? Number(report.totalScore) : null,
+    };
+    const storedScoreProfile = asRecord(reportJson.score_profile);
+    const scoreProfile = Object.keys(storedScoreProfile).length > 0
+      ? storedScoreProfile
+      : {
+          conversion_version: `${SCORE_CONVERSION_VERSION}-legacy-fallback`,
+          skills: Object.fromEntries(
+            (['reading', 'listening', 'writing', 'speaking'] as const).map((skill) => {
+              const score = scores[skill];
+              if (score === null) return [skill, null];
+              const band = scaledScoreToPracticeBand(score);
+              return [skill, { score_30: score, band_6: band, cefr: practiceBandToCefr(band) }];
+            }),
+          ),
+        };
     res.json({
       attempt_id: attempt.id,
       status: report.status,
@@ -48,35 +96,22 @@ reportsRouter.get('/reports/:attemptId', async (req, res, next) => {
       exam_title: attempt.examVersion.examPaper.title,
       exam_version: attempt.examVersion.versionNo,
       completed_at: attempt.completedAt,
-      scores: {
-        reading: report.readingScore !== null ? Number(report.readingScore) : null,
-        listening: report.listeningScore !== null ? Number(report.listeningScore) : null,
-        writing: report.writingScore !== null ? Number(report.writingScore) : null,
-        speaking: report.speakingScore !== null ? Number(report.speakingScore) : null,
-        total: report.totalScore !== null ? Number(report.totalScore) : null,
-      },
+      scores,
       objective_stats: reportJson.objective_stats ?? null,
+      score_profile: scoreProfile,
       ai_feedback: {
-        writing: attempt.aiGradeResults
-          .filter((r) => r.skill === 'writing')
-          .map((r) => ({
-            exam_item_id: r.examItemId,
-            overall_score: Number(r.overallScore),
-            rubric: r.rubricJson,
-            feedback: r.feedbackJson,
-            status: r.status,
-            model_name: r.modelName,
-          })),
-        speaking: attempt.aiGradeResults
-          .filter((r) => r.skill === 'speaking')
-          .map((r) => ({
-            exam_item_id: r.examItemId,
-            overall_score: Number(r.overallScore),
-            rubric: r.rubricJson,
-            feedback: r.feedbackJson,
-            status: r.status,
-            model_name: r.modelName,
-          })),
+        reading: serializeSkill('reading'),
+        listening: serializeSkill('listening'),
+        writing: serializeSkill('writing'),
+        speaking: serializeSkill('speaking'),
+      },
+      feedback_locales: {
+        'zh-TW': feedbackLocales['zh-TW'] ?? { status: 'succeeded' },
+        en: {
+          status: englishTranslation.status ?? asRecord(feedbackLocales.en).status ?? 'not_requested',
+          generated_at: englishTranslation.generated_at ?? null,
+          items: Array.isArray(englishTranslation.items) ? englishTranslation.items : [],
+        },
       },
       teacher_comments: report.comments.map((c) => ({
         id: c.id,
@@ -91,9 +126,83 @@ reportsRouter.get('/reports/:attemptId', async (req, res, next) => {
   }
 });
 
+reportsRouter.post('/reports/:attemptId/feedback-translations/en', async (req, res, next) => {
+  try {
+    const attempt = await loadReport(req as unknown as AuthedRequest, req.params.attemptId);
+    const report = attempt.scoreReports[0];
+    if (!report || report.status !== 'published') {
+      throw errors.business('REPORT_NOT_READY', 'Report is not published yet.');
+    }
+    const requestResult = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "score_reports" WHERE "id" = ${report.id} FOR UPDATE`;
+      const lockedReport = await tx.scoreReport.findUnique({ where: { id: report.id } });
+      if (!lockedReport) throw errors.notFound('Report');
+
+      const currentJson = asRecord(lockedReport.reportJson);
+      const existingEnglish = asRecord(asRecord(currentJson.feedback_translations).en);
+      if (existingEnglish.status === 'succeeded') {
+        return { kind: 'cached' as const };
+      }
+
+      const existingJob = await tx.gradingJob.findFirst({
+        where: {
+          attemptId: attempt.id,
+          jobType: 'feedback_translation',
+          status: { in: ['queued', 'processing', 'retrying'] },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existingJob) {
+        return { kind: 'existing' as const, job: existingJob };
+      }
+
+      const job = await tx.gradingJob.create({
+        data: {
+          attemptId: attempt.id,
+          jobType: 'feedback_translation',
+          payloadJson: { target_locale: 'en' },
+        },
+      });
+      const translations = asRecord(currentJson.feedback_translations);
+      await tx.scoreReport.update({
+        where: { id: report.id },
+        data: {
+          reportJson: {
+            ...currentJson,
+            feedback_translations: {
+              ...translations,
+              en: { status: 'queued', requested_at: new Date().toISOString() },
+            },
+          },
+        },
+      });
+      return { kind: 'created' as const, job };
+    });
+
+    if (requestResult.kind === 'cached') {
+      res.json({ status: 'succeeded', cached: true });
+      return;
+    }
+    if (requestResult.kind === 'existing') {
+      res.status(202).json({ status: requestResult.job.status, grading_job_id: requestResult.job.id });
+      return;
+    }
+
+    const job = requestResult.job;
+    await gradingQueue.add(
+      'feedback_translation',
+      { gradingJobId: job.id, attemptId: attempt.id },
+      { jobId: job.id },
+    );
+    res.status(202).json({ status: 'queued', grading_job_id: job.id });
+  } catch (error) {
+    next(error);
+  }
+});
+
 reportsRouter.get('/reports/:attemptId/pdf', async (req, res, next) => {
   try {
-    const attempt = await loadReport(req as AuthedRequest, req.params.attemptId);
+    const attempt = await loadReport(req as unknown as AuthedRequest, req.params.attemptId);
     const report = attempt.scoreReports[0];
     if (!report?.pdfStorageKey) throw errors.business('REPORT_NOT_READY', 'PDF is not ready yet.');
     const url = await signedGetUrl(buckets.reports, report.pdfStorageKey, 600);
@@ -169,10 +278,12 @@ reportsRouter.get('/teacher/results', requireRole('teacher', 'org_admin', 'platf
       class_id?: string;
       assignment_id?: string;
       status?: string;
+      organization_id?: string;
     };
+    const organizationId = req.query.organization_id as string | undefined;
     const attempts = await prisma.attempt.findMany({
       where: {
-        ...(user.role === 'platform_admin' ? {} : { organizationId: user.organizationId! }),
+        ...(user.role === 'platform_admin' ? organizationId ? { organizationId } : {} : { organizationId: user.organizationId! }),
         ...(assignment_id ? { assignmentId: assignment_id } : {}),
         ...(class_id ? { assignment: { classId: class_id } } : {}),
         ...(status ? { status: status as 'completed' | 'grading' } : { status: { in: ['submitted', 'grading', 'completed'] } }),

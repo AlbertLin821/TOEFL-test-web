@@ -11,7 +11,7 @@ gradingRouter.use('/grading-jobs', requireAuth);
 
 gradingRouter.get('/grading-jobs/:id', async (req, res, next) => {
   try {
-    const user = (req as AuthedRequest).user;
+    const user = (req as unknown as AuthedRequest).user;
     const job = await prisma.gradingJob.findUnique({
       where: { id: req.params.id },
       include: { attempt: true },
@@ -71,11 +71,18 @@ gradingRouter.post(
       if (!['failed'].includes(job.status)) {
         throw errors.conflict('Only failed jobs can be retried.');
       }
-      await prisma.gradingJob.update({
-        where: { id: job.id },
-        data: { status: 'queued', retryCount: 0, errorMessage: null },
+      await prisma.$transaction([
+        prisma.gradingJob.update({
+          where: { id: job.id },
+          data: { status: 'queued', retryCount: 0, errorMessage: null },
+        }),
+        ...(job.jobType === 'feedback_translation'
+          ? []
+          : [prisma.attempt.update({ where: { id: job.attemptId }, data: { status: 'grading' as const } })]),
+      ]);
+      await gradingQueue.add(job.jobType, { gradingJobId: job.id, attemptId: job.attemptId }, {
+        jobId: `${job.id}-retry-${Date.now()}`,
       });
-      await gradingQueue.add(job.jobType, { gradingJobId: job.id, attemptId: job.attemptId });
       await auditLog({
         organizationId: job.attempt.organizationId,
         actorUserId: user.id,
