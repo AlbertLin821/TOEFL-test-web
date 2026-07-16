@@ -15,11 +15,27 @@ body {
   }
 
   .exam-topbar {
-    @apply bg-exam-bar text-white flex items-center justify-between px-4 py-2 text-sm;
+    @apply min-h-[52px] bg-exam-bar text-white flex items-center justify-between px-4 py-2 text-sm;
   }
 
   .exam-btn {
-    @apply px-3 py-1 rounded border border-white/30 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-white/40 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .exam-btn-back {
+    @apply bg-[#003d3d] text-white;
+  }
+
+  .exam-btn-next {
+    @apply bg-white text-exam-bar border-white hover:bg-slate-50;
+  }
+
+  .exam-item-subheader {
+    @apply min-h-[46px] flex items-center justify-between border-b border-slate-200 bg-[#f6f6f6] px-5 text-sm text-slate-800;
+  }
+
+  .exam-time-toggle {
+    @apply inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-slate-700 hover:bg-slate-50;
   }
 
   .exam-btn-primary {
@@ -72,6 +88,233 @@ body {
   .exam-section-task-table th {
     @apply font-semibold;
     background-color: #b6e2b6;
+  }
+
+  .listening-section-table th {
+    background-color: #69d0dc;
+  }
+
+  .writing-section-table th {
+    background-color: #f7a66f;
+  }
+
+  .listening-audio-scene {
+    @apply mx-auto flex min-h-[calc(100vh-98px)] max-w-5xl flex-col items-center justify-center gap-5 px-8 py-10 text-center;
+  }
+
+  .listening-scene-title {
+    @apply text-2xl font-semibold text-slate-800;
+  }
+
+  .listening-visual {
+    @apply flex min-h-[360px] w-full max-w-[520px] items-end justify-center overflow-hidden bg-white;
+  }
+
+  .listening-visual img {
+    @apply max-h-[500px] max-w-full object-contain;
+  }
+
+  .listening-visual-compact {
+    @apply min-h-0 max-w-[420px];
+  }
+
+  .listening-visual-compact img {
+    @apply max-h-[440px];
+  }
+
+  .listening-question-layout {
+    @apply mx-auto grid min-h-[calc(100vh-98px)] w-full max-w-7xl grid-cols-[minmax(340px,0.9fr)_minmax(480px,1.1fr)] gap-14 px-10 py-10;
+  }
+
+  .listening-question-visual-panel {
+    @apply flex items-center justify-center border-r border-slate-200 pr-12;
+  }
+
+  .listening-question-options {
+    @apply flex min-w-0 flex-col justify-center;
+  }
+
+  .listening-question-options legend {
+    @apply mb-6 text-xl font-semibold leading-8 text-slate-900;
+  }
+
+  .listening-option {
+    @apply flex min-h-[58px] cursor-pointer items-center gap-4 rounded-md border border-slate-300 bg-white px-5 py-3 text-base leading-6 text-slate-900 transition-colors hover:border-exam-bar hover:bg-teal-50;
+  }
+
+  .listening-option input {
+    @apply h-5 w-5 shrink-0 accent-exam-bar;
+  }
+
+  .listening-option-locked {
+    @apply cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400 hover:border-slate-200 hover:bg-slate-50;
+  }
+
+  .listening-option-selected {
+    @apply border-exam-bar bg-teal-50;
+  }
+
+  .writing-sentence-page {
+    @apply mx-auto w-full max-w-6xl px-10 py-8 text-slate-800;
+  }
+
+  .writing-sentence-page > h2,
+  .writing-prompt-panel > h2,
+  .writing-response-panel > h2 {
+    @apply mb-6 border-b border-slate-300 pb-3 text-2xl font-normal text-slate-700;
+  }
+
+  .writing-dialogue {
+    @apply space-y-5;
+  }
+
+  .writing-dialogue-turn {
+    @apply grid grid-cols-[96px_1fr] items-center gap-6 text-lg leading-8;
+  }
+
+  .writing-dialogue-turn img {
+    @apply h-24 w-24 rounded-full object-cover;
+  }
+
+  .writing-avatar-one {
+    object-position: center top;
+  }
+
+  .writing-avatar-two {
+    object-position: center bottom;
+  }
+
+  .writing-sentence-zone {
+    @apply flex min-h-[56px] min-w-[300px] flex-1 flex-wrap items-center gap-2 rounded-md border border-dashed border-slate-400 bg-slate-50 px-3 py-2 transition-colors;
+  }
+
+  .writing-drop-active {
+    @apply border-exam-bar bg-teal-50;
+  }
+
+  .writing-empty-slot {
+    @apply inline-block h-9 min-w-[62px] border-b-2 border-slate-400;
+  }
+
+  .writing-drag-hint {
+    @apply mb-3 mt-8 text-sm text-slate-500;
+  }
+
+  .writing-word-bank {
+    @apply flex min-h-[86px] flex-wrap items-center gap-3 rounded-md border border-slate-300 bg-white p-4;
+  }
+
+  .writing-token {
+    @apply cursor-grab select-none rounded-md border border-slate-400 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm hover:border-exam-bar focus:outline-none focus:ring-2 focus:ring-exam-bar focus:ring-offset-1 active:cursor-grabbing;
+  }
+
+  .writing-token-selected {
+    @apply border-exam-bar bg-teal-50;
+  }
+
+  .writing-token-dragging {
+    @apply z-10 shadow-lg;
+  }
+
+  .writing-token:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  .writing-essay-layout {
+    @apply grid min-h-[calc(100vh-98px)] grid-cols-[minmax(420px,0.9fr)_minmax(520px,1.1fr)] bg-white;
+  }
+
+  .writing-prompt-panel,
+  .writing-response-panel {
+    @apply min-h-0 overflow-y-auto px-8 py-7;
+  }
+
+  .writing-prompt-panel {
+    @apply space-y-5 border-r border-slate-300 bg-slate-50 text-base leading-7;
+  }
+
+  .writing-prompt-panel ul {
+    @apply list-disc space-y-2 pl-6;
+  }
+
+  .writing-professor-question {
+    @apply font-normal;
+  }
+
+  .writing-professor-profile {
+    @apply flex flex-col items-center gap-2 text-sm;
+  }
+
+  .writing-professor-profile img {
+    @apply h-28 w-28 rounded-full object-cover;
+  }
+
+  .writing-response-panel {
+    @apply flex flex-col;
+  }
+
+  .writing-email-meta {
+    @apply mb-4 space-y-1 border-b border-slate-200 pb-3 text-sm;
+  }
+
+  .writing-student-posts {
+    @apply mb-4 grid max-h-[270px] grid-cols-1 gap-3 overflow-y-auto;
+  }
+
+  .writing-student-posts article {
+    @apply grid grid-cols-[56px_1fr] items-start gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm leading-5;
+  }
+
+  .writing-student-posts article img {
+    @apply h-14 w-14 rounded-full object-cover;
+  }
+
+  .writing-response-panel textarea {
+    @apply min-h-[230px] flex-1 resize-none rounded-b-md border-2 border-exam-bar p-4 text-base leading-7 outline-none focus:ring-2 focus:ring-teal-200;
+  }
+
+  .writing-editor-toolbar {
+    @apply flex flex-wrap items-center justify-between gap-3 rounded-t-md border-x-2 border-t-2 border-exam-bar bg-slate-100 px-3 py-2;
+  }
+
+  .writing-editor-toolbar button {
+    @apply inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50;
+  }
+
+  .writing-editor-toolbar button:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  .writing-response-panel textarea:disabled {
+    @apply cursor-not-allowed bg-slate-50 text-slate-700;
+  }
+
+  .writing-editor-toolbar output {
+    @apply min-w-8 rounded bg-white px-2 py-1 text-center font-mono text-sm font-semibold text-slate-800;
+  }
+
+  .writing-save-status {
+    @apply mt-2 min-h-5 text-right text-xs text-slate-500;
+  }
+
+  @media (max-width: 900px) {
+    .listening-question-layout,
+    .writing-essay-layout {
+      @apply grid-cols-1;
+    }
+
+    .listening-question-visual-panel,
+    .writing-prompt-panel {
+      @apply border-r-0 border-b border-slate-200 pb-8;
+    }
+
+    .listening-visual-compact img {
+      @apply max-h-[280px];
+    }
+
+    .writing-student-posts {
+      @apply grid-cols-1;
+    }
   }
 
   .reading-section-intro-title {

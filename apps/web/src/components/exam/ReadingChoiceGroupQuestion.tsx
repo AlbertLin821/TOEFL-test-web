@@ -72,7 +72,11 @@ function ReadingQuestionBlock({
   answers: Record<string, unknown>;
   onSelect: (itemId: string, optionIndex: number) => void;
 }) {
-  const questionNumber = groupItem.content.question_number ?? groupItem.order_no;
+  const rawQuestionNumber = groupItem.content.question_number;
+  const questionNumber =
+    typeof rawQuestionNumber === 'string' || typeof rawQuestionNumber === 'number'
+      ? rawQuestionNumber
+      : groupItem.order_no;
   const questionText = String(groupItem.content.question_text ?? '');
   const options = (groupItem.content.options as string[]) ?? [];
   const ans = answers[groupItem.id] as Record<string, unknown> | undefined;

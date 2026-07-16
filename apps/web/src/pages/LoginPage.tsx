@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth, homeForRole } from '../auth/AuthContext';
 import { ApiClientError } from '../lib/api';
 
-export default function LoginPage() {
+export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('student@demo.local');
@@ -27,7 +27,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100">
+    <main className="min-h-screen flex items-center justify-center bg-slate-100 px-4 py-10">
       <form onSubmit={onSubmit} className="bg-white p-8 rounded-lg shadow-md w-full max-w-md space-y-4">
         <div>
           <h1 className="text-xl font-semibold">TOEFL-style Mock Test Platform</h1>
@@ -42,7 +42,8 @@ export default function LoginPage() {
           Email
           <input
             type="email"
-            className="mt-1 w-full border rounded px-3 py-2"
+            autoComplete="email"
+            className="mt-1 w-full border rounded px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -52,19 +53,30 @@ export default function LoginPage() {
           Password
           <input
             type="password"
-            className="mt-1 w-full border rounded px-3 py-2"
+            autoComplete="current-password"
+            className="mt-1 w-full border rounded px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
         </label>
-        <button type="submit" disabled={loading} className="w-full exam-btn-primary py-2">
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full exam-btn-primary py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        >
           {loading ? 'Logging in...' : 'Login'}
         </button>
+        <p className="text-center text-sm text-slate-600">
+          還沒有帳號？{' '}
+          <Link className="font-medium text-blue-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600" to="/register">
+            立即註冊
+          </Link>
+        </p>
         <p className="text-xs text-slate-500">
           Demo: student@demo.local / teacher@demo.local / orgadmin@demo.local (Password123!)
         </p>
       </form>
-    </div>
+    </main>
   );
 }

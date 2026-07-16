@@ -527,6 +527,7 @@ async function main() {
           prefix: q.prefix ?? null,
           suffix: q.suffix ?? null,
           tokens: q.tokens,
+          slot_count: q.correctOrder.length,
           question_number: i + 1,
         },
       },

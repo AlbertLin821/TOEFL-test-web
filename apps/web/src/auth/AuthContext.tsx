@@ -4,6 +4,7 @@ import { api, type ApiUser } from '../lib/api';
 interface AuthContextValue {
   user: ApiUser | null;
   loading: boolean;
+  register: (name: string, email: string, password: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -33,13 +34,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   };
 
+  const register = async (name: string, email: string, password: string) => {
+    const { user: u } = await api.register(name, email, password);
+    setUser(u);
+  };
+
   const logout = async () => {
     await api.logout();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, register, login, logout, refresh }}>{children}</AuthContext.Provider>
   );
 }
 

@@ -9,7 +9,6 @@ import {
   type ExamSectionDto,
   type ExamVersionDto,
 } from '../../api/client';
-import { FullScreenLoading } from '../../App';
 import TopBar from './TopBar';
 import HardwareCheck from './HardwareCheck';
 import FillBlankItem from './items/FillBlankItem';
@@ -31,6 +30,10 @@ const SECTION_LABEL: Record<string, string> = {
   writing: 'Writing',
   speaking: 'Speaking',
 };
+
+function FullScreenLoading() {
+  return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">Loading exam...</div>;
+}
 
 export default function ExamRunner() {
   const { attemptId } = useParams<{ attemptId: string }>();

@@ -1,9 +1,21 @@
 import { z } from 'zod';
 import { ROLES, SECTION_TYPES } from './constants.js';
 
+const emailSchema = z
+  .string()
+  .trim()
+  .email()
+  .transform((email) => email.toLowerCase());
+
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   password: z.string().min(1),
+});
+
+export const registerSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  email: emailSchema,
+  password: z.string().min(8).max(100),
 });
 
 export const createUserSchema = z.object({

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth, homeForRole } from './auth/AuthContext';
-import LoginPage from './pages/LoginPage';
+import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
 import AvailableExamsPage from './pages/student/AvailableExamsPage';
 import HardwareCheckPage from './pages/student/HardwareCheckPage';
 import ExamRunnerPage from './pages/student/ExamRunnerPage';
@@ -22,6 +23,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to={homeForRole(user.role)} replace /> : <LoginPage />} />
+      <Route path="/register" element={user ? <Navigate to={homeForRole(user.role)} replace /> : <RegisterPage />} />
       <Route
         path="/student/exams"
         element={
