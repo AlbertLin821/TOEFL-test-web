@@ -34,9 +34,26 @@ export function findSavedExamPosition(attempt: AttemptState, sections: ExamSecti
   const currentSectionState = attempt.current_section_id
     ? attempt.section_states.find((state) => state.section_id === attempt.current_section_id)
     : undefined;
+
+  if (attempt.current_section_id) {
+    const sectionIdx = sections.findIndex((candidate) => candidate.id === attempt.current_section_id);
+    if (sectionIdx < 0) return null;
+
+    if (currentSectionState?.current_item_id) {
+      const position = findExamPositionForItem(sections, currentSectionState.current_item_id);
+      if (position?.sectionIdx === sectionIdx) return position;
+    }
+
+    const section = sections[sectionIdx];
+    const savedModuleIdx = currentSectionState?.module_id
+      ? section.modules.findIndex((candidate) => candidate.id === currentSectionState.module_id)
+      : 0;
+    const phase: ExamPhase = currentSectionState?.status === 'completed' ? 'section_end' : 'module_intro';
+    return { sectionIdx, moduleIdx: Math.max(0, savedModuleIdx), itemIdx: 0, phase };
+  }
+
   const itemIds = [
     attempt.current_item_id,
-    currentSectionState?.current_item_id,
     ...attempt.section_states.map((state) => state.current_item_id),
   ].filter((itemId): itemId is string => Boolean(itemId));
 
@@ -45,16 +62,7 @@ export function findSavedExamPosition(attempt: AttemptState, sections: ExamSecti
     if (position) return position;
   }
 
-  if (!attempt.current_section_id) return null;
-  const sectionIdx = sections.findIndex((candidate) => candidate.id === attempt.current_section_id);
-  if (sectionIdx < 0) return null;
-
-  const section = sections[sectionIdx];
-  const savedModuleIdx = currentSectionState?.module_id
-    ? section.modules.findIndex((candidate) => candidate.id === currentSectionState.module_id)
-    : 0;
-  const phase: ExamPhase = currentSectionState?.status === 'completed' ? 'section_end' : 'module_intro';
-  return { sectionIdx, moduleIdx: Math.max(0, savedModuleIdx), itemIdx: 0, phase };
+  return null;
 }
 
 export function getRestoredListeningGroups(sections: ExamSectionDetail[], position: ExamPosition) {
