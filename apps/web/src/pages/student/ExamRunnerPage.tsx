@@ -5,6 +5,7 @@ import { Volume2 } from 'lucide-react';
 import ExamTopBar from '../../components/exam/ExamTopBar';
 import ExamFlowShell from '../../components/exam/ExamFlowShell';
 import HardwareCheckFlow from '../../components/exam/HardwareCheckFlow';
+import ReadingReviewDialog from '../../components/exam/ReadingReviewDialog';
 import ReadingExamTopBar from '../../components/exam/ReadingExamTopBar';
 import ReadingFillBlankQuestion from '../../components/exam/ReadingFillBlankQuestion';
 import ReadingChoiceGroupQuestion from '../../components/exam/ReadingChoiceGroupQuestion';
@@ -40,69 +41,35 @@ import SpeakingQuestionPanel from '../../components/exam/SpeakingQuestionPanel';
 import SpeakingStopDialog from '../../components/exam/SpeakingStopDialog';
 import { getReadingChoiceGroupBounds, isStackedReadingGroup } from '../../lib/reading-choice-group';
 import { getReadingQuestionLabel, buildReadingReviewEntries } from '../../lib/reading-exam-utils';
-import { getSpeakingQuestionLabel, getSpeakingResponseSeconds, getSpeakingVolumeControl, waitForSpeakingStopDialogMinimum } from '../../lib/speaking-exam-utils';
+import { getSpeakingQuestionLabel, getSpeakingResponseSeconds, getSpeakingVolumeControl } from '../../lib/speaking-exam-utils';
 import { useCountdown } from '../../hooks/useCountdown';
 import { api, type ExamItemDetail, type ExamModuleDetail, type ExamSectionDetail } from '../../lib/api';
 import { EXAM_DEBUG_START_AT_SPEAKING } from '../../lib/exam-debug';
-
-interface PendingAnswerSave {
-  response: unknown;
-  version: number;
-  persistedVersion: number;
-  inFlight: Promise<boolean> | null;
-}
+import { useAutosaveResponses } from './useAutosaveResponses';
+import { useExamFlowState } from './useExamFlowState';
+import { useListeningPlayback } from './useListeningPlayback';
+import { useSpeakingRecorder } from './useSpeakingRecorder';
 
 interface PendingExamTimeout {
   kind: 'writing_module' | 'listening_item';
   key: string;
 }
 
+
 export default function ExamRunnerPage() {
   const { attemptId } = useParams<{ attemptId: string }>();
   const navigate = useNavigate();
-  const [sectionIdx, setSectionIdx] = useState(0);
-  const [moduleIdx, setModuleIdx] = useState(0);
-  const [itemIdx, setItemIdx] = useState(0);
-  const [phase, setPhase] = useState<
-    | 'section_intro'
-    | 'module_intro'
-    | 'module_scenario'
-    | 'module_end'
-    | 'listening_group_intro'
-    | 'listening_audio'
-    | 'writing_time_remaining'
-    | 'item'
-    | 'section_end'
-  >('section_intro');
   const [showTimer, setShowTimer] = useState(true);
-  const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [listeningLocked, setListeningLocked] = useState(true);
-  const [listeningGroupIntroSeen, setListeningGroupIntroSeen] = useState<Record<string, boolean>>({});
-  const [listeningAudioError, setListeningAudioError] = useState('');
   const [volume, setVolume] = useState(1);
   const [volumeOpen, setVolumeOpen] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
-  const speakingPromptAudioRef = useRef<HTMLAudioElement | null>(null);
-  const mediaRecorder = useRef<MediaRecorder | null>(null);
-  const activeSpeakItemIdRef = useRef<string | null>(null);
-  const speakingTimedOutRef = useRef(false);
-  const speakingStopDialogShownAtRef = useRef(0);
-  const stopSpeakingRef = useRef<(timedOut?: boolean) => void>(() => {});
-  const [speakingPhase, setSpeakingPhase] = useState<'idle' | 'playing' | 'recording' | 'uploading'>('idle');
-  const [speakingResponseLimit, setSpeakingResponseLimit] = useState(0);
-  const [showSpeakingStopDialog, setShowSpeakingStopDialog] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('');
   const [answeringFrozen, setAnsweringFrozen] = useState(false);
   const [navigationPending, setNavigationPending] = useState(false);
   const transitionLockRef = useRef(false);
   const answeringTimedOutRef = useRef(false);
   const pendingExamTimeoutRef = useRef<PendingExamTimeout | null>(null);
-  const pendingAnswerSavesRef = useRef<Map<string, PendingAnswerSave>>(new Map());
-  const saveDebounceRef = useRef<number | null>(null);
-  const [debugReady, setDebugReady] = useState(!EXAM_DEBUG_START_AT_SPEAKING);
 
   const beginNavigation = useCallback(() => {
     if (transitionLockRef.current) return false;
@@ -131,112 +98,56 @@ export default function ExamRunnerPage() {
     enabled: !!attemptQuery.data?.exam_version_id && !pendingHardwareCheck,
   });
 
-  const pumpAnswerSave = useCallback(
-    (itemId: string): Promise<boolean> => {
-      const state = pendingAnswerSavesRef.current.get(itemId);
-      if (!attemptId || !state) return Promise.resolve(false);
-      if (state.inFlight) return state.inFlight;
-
-      const operation = (async () => {
-        try {
-          while (state.persistedVersion < state.version) {
-            const response = state.response;
-            const version = state.version;
-            await api.saveResponse(attemptId, itemId, response);
-            state.persistedVersion = version;
-          }
-          return true;
-        } catch {
-          return false;
-        } finally {
-          state.inFlight = null;
-        }
-      })();
-
-      state.inFlight = operation;
-      return operation;
+  const sections = useMemo(() => examQuery.data?.sections ?? [], [examQuery.data?.sections]);
+  const {
+    listeningAudioError,
+    listeningGroupIntroSeen,
+    listeningLocked,
+    playListeningItem,
+    setListeningAudioError,
+    setListeningGroupIntroSeen,
+    setListeningLocked,
+  } = useListeningPlayback(volume);
+  const handleFlowRestore = useCallback(
+    ({
+      listeningGroups,
+      listeningLocked: restoredListeningLocked,
+    }: {
+      listeningGroups: Record<string, boolean>;
+      listeningLocked: boolean;
+    }) => {
+      setListeningGroupIntroSeen(listeningGroups);
+      setListeningLocked(restoredListeningLocked);
+      setListeningAudioError('');
+      setReviewOpen(false);
     },
-    [attemptId],
+    [setListeningAudioError, setListeningGroupIntroSeen, setListeningLocked],
   );
-
-  const flushPendingAnswers = useCallback(async () => {
-    if (saveDebounceRef.current !== null) {
-      window.clearTimeout(saveDebounceRef.current);
-      saveDebounceRef.current = null;
-    }
-
-    const dirtyItems = [...pendingAnswerSavesRef.current.entries()].filter(
-      ([, state]) => state.persistedVersion < state.version,
-    );
-    if (dirtyItems.length === 0) return true;
-
-    const results = await Promise.all(dirtyItems.map(([itemId]) => pumpAnswerSave(itemId)));
-    const allSaved =
-      results.every(Boolean) &&
-      [...pendingAnswerSavesRef.current.values()].every((state) => state.persistedVersion >= state.version);
-    setSaveStatus(allSaved ? 'Saved' : 'Save failed - select Next again to retry');
-    return allSaved;
-  }, [pumpAnswerSave]);
-
-  const saveAnswer = useCallback(
-    (itemId: string, response: unknown) => {
-      setAnswers((previous) => ({ ...previous, [itemId]: response }));
-      const existing = pendingAnswerSavesRef.current.get(itemId);
-      const state: PendingAnswerSave = existing ?? {
-        response,
-        version: 0,
-        persistedVersion: 0,
-        inFlight: null,
-      };
-      state.response = response;
-      state.version += 1;
-      pendingAnswerSavesRef.current.set(itemId, state);
-      setSaveStatus('Saving...');
-
-      if (saveDebounceRef.current !== null) window.clearTimeout(saveDebounceRef.current);
-      saveDebounceRef.current = window.setTimeout(() => {
-        saveDebounceRef.current = null;
-        void flushPendingAnswers();
-      }, 300);
-    },
-    [flushPendingAnswers],
-  );
-
-  useEffect(
-    () => () => {
-      if (saveDebounceRef.current !== null) window.clearTimeout(saveDebounceRef.current);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (attemptQuery.data?.responses) {
-      const map: Record<string, unknown> = {};
-      for (const r of attemptQuery.data.responses) map[r.exam_item_id] = r.response;
-      setAnswers(map);
-    }
-  }, [attemptQuery.data]);
-
-  useEffect(() => {
-    if (!EXAM_DEBUG_START_AT_SPEAKING || !examQuery.data) return;
-
-    const speakingIdx = examQuery.data.sections.findIndex((s) => s.section_type === 'speaking');
-    if (speakingIdx < 0) {
-      setDebugReady(true);
-      return;
-    }
-
-    setSectionIdx(speakingIdx);
-    setModuleIdx(0);
-    setItemIdx(0);
-    setPhase('section_intro');
-    setDebugReady(true);
-  }, [examQuery.data]);
-
-  const sections = examQuery.data?.sections ?? [];
+  const {
+    debugReady,
+    examPositionReady,
+    itemIdx,
+    moduleIdx,
+    phase,
+    sectionIdx,
+    setItemIdx,
+    setModuleIdx,
+    setPhase,
+    setSectionIdx,
+  } = useExamFlowState({
+    attemptId,
+    attempt: attemptQuery.data,
+    sections,
+    debugStartAtSpeaking: EXAM_DEBUG_START_AT_SPEAKING,
+    onRestoreSideEffects: handleFlowRestore,
+  });
   const section: ExamSectionDetail | undefined = sections[sectionIdx];
   const mod: ExamModuleDetail | undefined = section?.modules[moduleIdx];
   const item: ExamItemDetail | undefined = mod?.items[itemIdx];
+  const { answers, flushPendingAnswers, saveAnswer, saveStatus, setSaveStatus } = useAutosaveResponses(
+    attemptId,
+    attemptQuery.data?.responses,
+  );
 
   async function advanceBeyondCurrentModule(lockOnFailure = false) {
     if (!section || !beginNavigation()) return;
@@ -292,61 +203,29 @@ export default function ExamRunnerPage() {
     item?.id ?? 'no-item',
   );
 
-  const stopSpeaking = useCallback((timedOut = false) => {
-    speakingTimedOutRef.current = timedOut;
-    if (timedOut) {
-      speakingStopDialogShownAtRef.current = Date.now();
-      setShowSpeakingStopDialog(true);
-    }
-
-    const mr = mediaRecorder.current;
-    if (!mr || mr.state !== 'recording') {
-      if (timedOut) {
-        setSpeakingResponseLimit(0);
-        setSpeakingPhase('uploading');
-      }
-      return;
-    }
-
-    setSpeakingResponseLimit(0);
-    setSpeakingPhase('uploading');
-    mr.stop();
-  }, []);
-
-  stopSpeakingRef.current = stopSpeaking;
-
-  const [speakingResponseRemaining, setSpeakingResponseRemaining] = useState(0);
-
-  useEffect(() => {
-    if (speakingPhase !== 'recording' || speakingResponseLimit <= 0) {
-      setSpeakingResponseRemaining(0);
-      return;
-    }
-
-    setSpeakingResponseRemaining(speakingResponseLimit);
-    const timer = window.setInterval(() => {
-      setSpeakingResponseRemaining((current) => {
-        if (current <= 1) {
-          window.clearInterval(timer);
-          stopSpeakingRef.current(true);
-          return 0;
-        }
-        return current - 1;
-      });
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [speakingPhase, speakingResponseLimit]);
+  const currentSpeakingAudioUploaded = Boolean(
+    item &&
+      section?.section_type === 'speaking' &&
+      attemptQuery.data?.audio_responses.some((audio) => audio.exam_item_id === item.id && audio.status !== 'failed'),
+  );
+  const { showSpeakingStopDialog, speakingPhase, speakingResponseRemaining, stopSpeaking } = useSpeakingRecorder({
+    attemptId,
+    volumeRef,
+    item,
+    active: phase === 'item' && section?.section_type === 'speaking',
+    alreadyUploaded: currentSpeakingAudioUploaded,
+  });
 
   const persistSection = useCallback(async () => {
-    if (!attemptId || !section) return;
+    if (!examPositionReady || !attemptId || !section || phase === 'section_intro') return;
+    const currentItemId = phase === 'item' ? item?.id ?? null : null;
     await api.saveSectionState(attemptId, {
       section_id: section.id,
       module_id: mod?.id ?? null,
-      status: 'in_progress',
-      current_item_id: item?.id ?? null,
+      status: phase === 'section_end' ? 'completed' : 'in_progress',
+      current_item_id: currentItemId,
     });
-  }, [attemptId, section, mod, item]);
+  }, [examPositionReady, attemptId, section, mod, item, phase]);
 
   useEffect(() => {
     persistSection();
@@ -378,46 +257,6 @@ export default function ExamRunnerPage() {
     }
     navigate('/student/exams');
   };
-
-  const playListeningItem = useCallback((targetItem: ExamItemDetail, audioScene: boolean) => {
-    const audioAsset = targetItem.assets.find((asset) => asset.asset_type === 'audio');
-    if (!audioAsset) {
-      setListeningLocked(true);
-      setListeningAudioError('The listening audio is unavailable. Select Retry after checking the connection.');
-      return;
-    }
-
-    audioRef.current?.pause();
-    const audio = new Audio(audioAsset.url);
-    audio.volume = volumeRef.current;
-    audioRef.current = audio;
-    setListeningLocked(true);
-    setListeningAudioError('');
-
-    const fail = (reason?: unknown) => {
-      if (audioRef.current !== audio) return;
-      console.error('Listening audio playback failed.', reason, audio.error);
-      setListeningLocked(true);
-      setListeningAudioError('The listening audio could not be played. Select Retry to try again.');
-    };
-
-    audio.onended = () => {
-      if (audioRef.current !== audio) return;
-      audioRef.current = null;
-      setListeningLocked(false);
-      if (audioScene) setPhase('item');
-    };
-    audio.onerror = () => fail(audio.error);
-    void audio.play().catch(fail);
-  }, []);
-
-  useEffect(
-    () => () => {
-      audioRef.current?.pause();
-      audioRef.current = null;
-    },
-    [],
-  );
 
   const goNext = async () => {
     if (!section || !mod || !beginNavigation()) return;
@@ -464,14 +303,14 @@ export default function ExamRunnerPage() {
         if (startsAudioGroup) {
           setPhase('listening_audio');
           setListeningLocked(true);
-          playListeningItem(nextItem, true);
+          playListeningItem(nextItem, { audioScene: true, onAudioSceneEnd: () => setPhase('item') });
           return;
         }
 
         const hasAudio = Boolean(nextItem.assets.find((asset) => asset.asset_type === 'audio'));
         setPhase('item');
         setListeningLocked(hasAudio);
-        if (hasAudio) playListeningItem(nextItem, false);
+        if (hasAudio) playListeningItem(nextItem, { audioScene: false });
         return;
       }
 
@@ -552,7 +391,7 @@ export default function ExamRunnerPage() {
     setListeningAudioError('');
     if (section?.section_type === 'listening' && item) {
       setListeningLocked(true);
-      playListeningItem(item, false);
+      playListeningItem(item, { audioScene: false });
       return;
     }
     setListeningLocked(false);
@@ -564,7 +403,7 @@ export default function ExamRunnerPage() {
     setListeningLocked(true);
     setListeningAudioError('');
     setPhase('listening_audio');
-    if (item) playListeningItem(item, true);
+    if (item) playListeningItem(item, { audioScene: true, onAudioSceneEnd: () => setPhase('item') });
   };
 
   const continueFromModuleIntro = () => {
@@ -616,111 +455,6 @@ export default function ExamRunnerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionIdx, moduleIdx, itemIdx, phase, releaseNavigation]);
 
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
-  }, [volume]);
-
-  const runSpeakingItem = useCallback(
-    async (speakItem: ExamItemDetail) => {
-      speakingTimedOutRef.current = false;
-      speakingStopDialogShownAtRef.current = 0;
-      setShowSpeakingStopDialog(false);
-      setSpeakingPhase('playing');
-      setSpeakingResponseLimit(0);
-      const promptUrl = speakItem.assets[0]?.url;
-      const responseSeconds = getSpeakingResponseSeconds(speakItem);
-
-      const startRecording = async () => {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          const mr = new MediaRecorder(stream);
-          mediaRecorder.current = mr;
-          activeSpeakItemIdRef.current = speakItem.id;
-          const chunks: Blob[] = [];
-          mr.ondataavailable = (e) => chunks.push(e.data);
-          mr.onstop = async () => {
-            if (activeSpeakItemIdRef.current !== speakItem.id) {
-              stream.getTracks().forEach((t) => t.stop());
-              return;
-            }
-            stream.getTracks().forEach((t) => t.stop());
-            const blob = new Blob(chunks, { type: 'audio/webm' });
-            const timedOut = speakingTimedOutRef.current;
-            if (timedOut) {
-              if (speakingStopDialogShownAtRef.current === 0) {
-                speakingStopDialogShownAtRef.current = Date.now();
-              }
-              setShowSpeakingStopDialog(true);
-            }
-            setSpeakingPhase('uploading');
-            try {
-              if (attemptId) {
-                await api.uploadAudio(attemptId, speakItem.id, blob, responseSeconds * 1000);
-              }
-            } finally {
-              if (timedOut) {
-                await waitForSpeakingStopDialogMinimum(speakingStopDialogShownAtRef.current);
-              }
-              speakingTimedOutRef.current = false;
-              speakingStopDialogShownAtRef.current = 0;
-              setShowSpeakingStopDialog(false);
-              setSpeakingResponseLimit(0);
-              setSpeakingPhase('idle');
-            }
-          };
-          mr.start();
-          setSpeakingResponseLimit(responseSeconds);
-          setSpeakingPhase('recording');
-        } catch {
-          setSpeakingResponseLimit(0);
-          setSpeakingPhase('idle');
-          alert('麥克風無法使用，請返回 Hardware Check 重新測試。');
-        }
-      };
-
-      if (promptUrl) {
-        speakingPromptAudioRef.current?.pause();
-        const audio = new Audio(promptUrl);
-        speakingPromptAudioRef.current = audio;
-        audio.volume = volumeRef.current;
-        audio.onended = () => void startRecording();
-        audio.onerror = () => {
-          setSpeakingPhase('idle');
-        };
-        try {
-          await audio.play();
-        } catch {
-          setSpeakingPhase('idle');
-        }
-      } else {
-        await startRecording();
-      }
-    },
-    [attemptId],
-  );
-
-  useEffect(() => {
-    if (phase !== 'item' || section?.section_type !== 'speaking' || !item) return;
-
-    void runSpeakingItem(item);
-
-    return () => {
-      activeSpeakItemIdRef.current = null;
-      speakingTimedOutRef.current = false;
-      speakingStopDialogShownAtRef.current = 0;
-      setShowSpeakingStopDialog(false);
-      speakingPromptAudioRef.current?.pause();
-      speakingPromptAudioRef.current = null;
-      setSpeakingResponseLimit(0);
-      setSpeakingResponseRemaining(0);
-      const mr = mediaRecorder.current;
-      if (mr && mr.state === 'recording') {
-        mr.stop();
-      }
-      mediaRecorder.current = null;
-    };
-  }, [item?.id, phase, section?.section_type, runSpeakingItem]);
-
   if (attemptQuery.isLoading) return <div className="p-8">Loading exam...</div>;
 
   if (pendingHardwareCheck && attemptId && attemptStatus) {
@@ -735,7 +469,7 @@ export default function ExamRunnerPage() {
     );
   }
 
-  if (examQuery.isLoading || (EXAM_DEBUG_START_AT_SPEAKING && !debugReady)) {
+  if (examQuery.isLoading || !examPositionReady || (EXAM_DEBUG_START_AT_SPEAKING && !debugReady)) {
     return <div className="p-8">Loading exam...</div>;
   }
 
@@ -833,7 +567,10 @@ export default function ExamRunnerPage() {
               type="button"
               className="shrink-0 rounded bg-red-700 px-3 py-1.5 font-medium text-white hover:bg-red-800"
               onClick={() => {
-                playListeningItem(item, phase === 'listening_audio');
+                playListeningItem(item, {
+                  audioScene: phase === 'listening_audio',
+                  onAudioSceneEnd: () => setPhase('item'),
+                });
               }}
             >
               Retry
@@ -1361,30 +1098,14 @@ export default function ExamRunnerPage() {
       )}
       <SpeakingStopDialog open={showSpeakingStopDialog} />
       {reviewOpen && mod && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h3 className="font-semibold mb-3">Review</h3>
-            <ul className="space-y-1 text-sm max-h-[60vh] overflow-y-auto">
-              {reviewEntries.map((entry, i) => (
-                <li key={`${entry.itemIdx}-${entry.label}-${i}`}>
-                  <button
-                    type="button"
-                    className="text-left w-full hover:underline"
-                    onClick={() => {
-                      setItemIdx(entry.itemIdx);
-                      setReviewOpen(false);
-                    }}
-                  >
-                    {entry.label} {entry.answered ? '(answered)' : '(unanswered)'}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button type="button" className="mt-4 exam-btn-primary" onClick={() => setReviewOpen(false)}>
-              Close
-            </button>
-          </div>
-        </div>
+        <ReadingReviewDialog
+          entries={reviewEntries}
+          onClose={() => setReviewOpen(false)}
+          onJump={(nextItemIdx) => {
+            setItemIdx(nextItemIdx);
+            setReviewOpen(false);
+          }}
+        />
       )}
     </div>
   );
