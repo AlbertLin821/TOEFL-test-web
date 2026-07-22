@@ -149,6 +149,51 @@ async function loadOwnedAttempt(req: AuthedRequest, attemptId: string) {
   return attempt;
 }
 
+async function loadAttemptItem(attempt: Awaited<ReturnType<typeof loadOwnedAttempt>>, examItemId: string) {
+  const item = await prisma.examItem.findUnique({
+    where: { id: examItemId },
+    include: { module: { include: { section: true } } },
+  });
+  if (!item) throw errors.notFound('Exam item');
+  if (item.module.section.examVersionId !== attempt.examVersionId) {
+    throw errors.forbidden('Exam item does not belong to this attempt.');
+  }
+  return item;
+}
+
+async function assertAttemptSectionState(
+  attempt: Awaited<ReturnType<typeof loadOwnedAttempt>>,
+  body: {
+    section_id: string;
+    module_id?: string | null;
+    current_item_id?: string | null;
+  },
+) {
+  const section = await prisma.examSection.findUnique({ where: { id: body.section_id } });
+  if (!section) throw errors.notFound('Exam section');
+  if (section.examVersionId !== attempt.examVersionId) {
+    throw errors.forbidden('Exam section does not belong to this attempt.');
+  }
+
+  if (body.module_id) {
+    const module = await prisma.examModule.findUnique({ where: { id: body.module_id } });
+    if (!module) throw errors.notFound('Exam module');
+    if (module.sectionId !== section.id) {
+      throw errors.forbidden('Exam module does not belong to this section.');
+    }
+  }
+
+  if (body.current_item_id) {
+    const item = await loadAttemptItem(attempt, body.current_item_id);
+    if (item.module.sectionId !== section.id) {
+      throw errors.forbidden('Current item does not belong to this section.');
+    }
+    if (body.module_id && item.moduleId !== body.module_id) {
+      throw errors.forbidden('Current item does not belong to this module.');
+    }
+  }
+}
+
 // ---------- Get attempt state ----------
 attemptsRouter.get('/attempts/:id', async (req, res, next) => {
   try {
@@ -219,8 +264,7 @@ attemptsRouter.patch('/attempts/:id/response', requireRole('student'), validateB
       throw errors.conflict('Attempt already submitted.');
     }
     const { exam_item_id, response_json } = req.body as { exam_item_id: string; response_json: unknown };
-    const item = await prisma.examItem.findUnique({ where: { id: exam_item_id } });
-    if (!item) throw errors.notFound('Exam item');
+    await loadAttemptItem(attempt, exam_item_id);
     const now = new Date();
     await prisma.$transaction([
       prisma.response.upsert({
@@ -258,6 +302,7 @@ attemptsRouter.patch('/attempts/:id/section-state', requireRole('student'), vali
       remaining_seconds?: number;
       current_item_id?: string | null;
     };
+    await assertAttemptSectionState(attempt, body);
     const now = new Date();
     const state = await prisma.attemptSectionState.upsert({
       where: { attemptId_sectionId: { attemptId: attempt.id, sectionId: body.section_id } },
@@ -300,8 +345,10 @@ attemptsRouter.post('/attempts/:id/audio', requireRole('student'), upload.single
     if (!examItemId) throw errors.validation({ exam_item_id: 'Required' });
     if (!req.file) throw errors.business('AUDIO_UPLOAD_FAILED', 'No audio file received.');
 
-    const item = await prisma.examItem.findUnique({ where: { id: examItemId } });
-    if (!item) throw errors.notFound('Exam item');
+    const item = await loadAttemptItem(attempt, examItemId);
+    if (item.module.section.sectionType !== 'speaking') {
+      throw errors.validation({ exam_item_id: 'Audio responses are only accepted for speaking items.' });
+    }
 
     const ext = req.file.mimetype.includes('ogg') ? 'ogg' : req.file.mimetype.includes('mp4') ? 'm4a' : 'webm';
     const storageKey = `recordings/${attempt.id}/${examItemId}-${nanoid(8)}.${ext}`;

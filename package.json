@@ -23,16 +23,5 @@
   "devDependencies": {
     "@playwright/test": "^1.51.0",
     "concurrently": "^10.0.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@prisma/client",
-      "@prisma/engines",
-      "argon2",
-      "esbuild",
-      "msgpackr-extract",
-      "prisma",
-      "puppeteer"
-    ]
   }
 }

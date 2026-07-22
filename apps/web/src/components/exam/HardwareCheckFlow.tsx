@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import ExamFlowShell from './ExamFlowShell';
 import { HeadphonesIcon, MicrophoneIcon, SpeakerIcon } from './HardwareCheckIcons';
@@ -15,6 +15,7 @@ interface HardwareCheckFlowProps {
 }
 
 const SAVED_STEPS: Step[] = ['volume', 'mic', 'record'];
+const VOLUME_TEST_AUDIO_SRC = '/exam/hardware-check/volume-test.wav';
 
 export default function HardwareCheckFlow({
   attemptId,
@@ -31,25 +32,32 @@ export default function HardwareCheckFlow({
   });
   const [volumePanelOpen, setVolumePanelOpen] = useState(false);
   const [volumeLevel, setVolumeLevel] = useState(0.7);
+  const [audioError, setAudioError] = useState('');
+  const testAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  const playTestTone = (level = volumeLevel) => {
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 440;
-    gain.gain.value = level * 0.15;
-    osc.start();
-    setTimeout(() => {
-      osc.stop();
-      void ctx.close();
-    }, 800);
+  useEffect(() => {
+    return () => {
+      testAudioRef.current?.pause();
+      testAudioRef.current = null;
+    };
+  }, []);
+
+  const playTestAudio = (level = volumeLevel) => {
+    setAudioError('');
+    const audio = testAudioRef.current ?? new Audio(VOLUME_TEST_AUDIO_SRC);
+    testAudioRef.current = audio;
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = level;
+    audio.onerror = () => setAudioError('Unable to play the test audio. Please check browser audio permissions.');
+    void audio.play().catch(() => {
+      setAudioError('Unable to play the test audio. Please check browser audio permissions.');
+    });
   };
 
   const handleVolumeChange = (level: number) => {
     setVolumeLevel(level);
-    playTestTone(level);
+    playTestAudio(level);
   };
 
   const goToStep = (next: Step) => {
@@ -112,7 +120,17 @@ export default function HardwareCheckFlow({
           </div>
           <div className="flex items-center gap-6 pt-4 text-exam-bar">
             <SpeakerIcon className="w-28 h-28 shrink-0" strokeWidth={1.25} />
-            <p className="text-slate-700 text-lg">You now have the option to adjust the volume.</p>
+            <div className="space-y-3 text-slate-700">
+              <p className="text-lg">You now have the option to adjust the volume.</p>
+              <button type="button" className="exam-btn-primary" onClick={() => playTestAudio()}>
+                Play test audio
+              </button>
+              {audioError && (
+                <p className="max-w-md text-sm text-red-700" role="alert">
+                  {audioError}
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </ExamFlowShell>
